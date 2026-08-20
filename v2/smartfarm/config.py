@@ -88,3 +88,13 @@ def avg_tou_rate() -> float:
     total_hours = sum(len(b["hours"]) for b in TOU_TARIFF.values())
     weighted = sum(len(b["hours"]) * b["rate"] for b in TOU_TARIFF.values())
     return round(weighted / total_hours, 1)
+
+# 기본 WUR 데이터셋의 측정 단위. WUR ReadMe 기재값이며 이 데이터셋에만 해당한다.
+# 업로드된 다른 데이터셋은 단위를 알 수 없으므로 비워 두고 표기하지 않는다.
+WUR_UNITS = {
+    "power_target": "kWh/m²/일",   # 난방(MJ)을 kWh로 환산해 합산한 값
+    "light": "µmol/m²s",           # Tot_PAR
+    "indoor_temp": "℃", "out_temp": "℃",
+    "indoor_humid": "%", "out_humid": "%",
+    "co2": "ppm", "windspeed": "m/s",
+}

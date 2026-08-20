@@ -95,6 +95,38 @@ def latest_observations(model_path=None) -> dict:
     return obs
 
 
+def _energy_unit(model_path=None) -> str:
+    """활성 데이터셋에 기록된 에너지 타깃 단위. 모르면 빈 문자열."""
+    mp = str(_model_path(model_path))
+    for ds in registry.list_datasets():
+        if str(ds.get("model_path")) == mp:
+            return (ds.get("units") or {}).get(TARGET_FEATURE, "")
+    active = registry.get_active() or {}
+    return (active.get("units") or {}).get(TARGET_FEATURE, "")
+
+
+def dataset_quantile(model_path=None):
+    """활성 데이터셋의 분포 백분위를 구하는 함수를 돌려준다.
+
+    온톨로지의 백분위 기준 제약이 데이터셋마다 다른 임계값을 갖도록 하는 데 쓴다.
+    값이 없거나 상수인 항목은 None을 반환해 해당 제약을 건너뛰게 한다.
+    """
+    df = dataset_frame(_model_path(model_path))
+    if "indoor_temp" in df.columns and "out_temp" in df.columns:
+        df = df.assign(temp_gap=df["indoor_temp"].astype(float)
+                       - df["out_temp"].astype(float))
+
+    def q(role: str, p: float):
+        if role not in df.columns or df.empty:
+            return None
+        s = df[role].astype(float)
+        if s.nunique() <= 1:
+            return None
+        return float(s.quantile(p))
+
+    return q
+
+
 def demand_drivers(model_path=None) -> list[dict]:
     """최근 구간의 환경 변수가 평년 대비 어느 방향으로 벗어났는지 산출.
 
@@ -306,11 +338,15 @@ def next_day_outlook(model_path=None) -> dict:
     level = _level(chosen, fc["recent_avg_energy"])
     avg_rate = config.avg_tou_rate()   # 시간대별 분포를 몰라 일 평균 단가로 근사
     area = config.GREENHOUSE_AREA_M2
-    # 예측값은 면적당(kWh/m²/일)이므로 재배 면적을 곱해야 온실 전체 비용이 된다.
-    total_kwh = fc["predicted_energy"] * area
+
+    # 요금은 타깃이 면적당 kWh일 때만 의미가 있다. 업로드된 데이터셋은 단위를
+    # 알 수 없으므로(Wh일 수도, 총량일 수도 있다) 요금을 계산하지 않는다.
+    unit = _energy_unit(mp)
+    cost_ok = "kwh" in unit.lower() and "m²" in unit
+    total_kwh = fc["predicted_energy"] * area if cost_ok else None
     return {
         **fc,
-        "energy_unit": config.ENERGY_UNIT,
+        "energy_unit": unit,
         "level": level,
         "method": method,
         "method_label": method_label,
@@ -319,11 +355,13 @@ def next_day_outlook(model_path=None) -> dict:
         "persistence_prediction": persist,
         "backtest": bt,
         "avg_rate": avg_rate,
-        "area_m2": area,
-        "predicted_energy_total_kwh": round(total_kwh, 1),
-        "estimated_cost": round(total_kwh * avg_rate, 1),
-        "cost_basis": (f"면적 {area}m² × 평균 단가 {avg_rate}원/kWh 기준 근사값. "
-                       f"시간대별 실측 분포가 없어 일 평균 단가를 사용"),
+        "area_m2": area if cost_ok else None,
+        "predicted_energy_total_kwh": round(total_kwh, 1) if cost_ok else None,
+        "estimated_cost": round(total_kwh * avg_rate, 1) if cost_ok else None,
+        "cost_basis": ((f"면적 {area}m² × 평균 단가 {avg_rate}원/kWh 기준 근사값. "
+                        f"시간대별 실측 분포가 없어 일 평균 단가를 사용")
+                       if cost_ok else
+                       "이 데이터셋은 에너지 단위를 알 수 없어 요금을 계산하지 않습니다"),
     }
 
 
@@ -356,7 +394,8 @@ def recommend_schedule(model_path=None, task: str | None = None) -> dict:
     # deferrable / needs_ventilation / energy_note는 개별 작업이 아니라 상위 개념
     # (비필수작업·개방작업 등)에 정의된 것을 계층에서 물려받은 값이다.
     if task:
-        check = knowledge.evaluate(task, latest_observations(mp))
+        check = knowledge.evaluate(task, latest_observations(mp),
+                                   quantile=dataset_quantile(mp))
         result["task_check"] = check
         note = check.get("energy_note") or ""
 

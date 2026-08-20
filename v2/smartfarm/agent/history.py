@@ -48,6 +48,10 @@ _REL_MONTH = {
 }
 _RE_RECENT_N = re.compile(r"(?:최근|지난)\s*(\d{1,3})\s*일")
 
+# 현재 시점 표현. 데이터가 과거 기간이라 실제 오늘 값은 없으므로
+# 마지막 관측일로 답하되 그 사실을 함께 알린다.
+_RE_NOW = re.compile(r"오늘|지금|현재|요즘|근래")
+
 # 보유 데이터 기간 자체를 묻는 질문
 _RE_COVERAGE = re.compile(
     r"언제\s*부터|언제\s*까지|어느\s*기간|기간이\s*(어떻게|얼마)|"
@@ -55,30 +59,31 @@ _RE_COVERAGE = re.compile(
 
 
 # --- 조회 가능한 측정 항목 ---
-# 단위는 WUR ReadMe 기재값을 따른다. 임의로 붙이지 않는다.
-#   Tot_PAR µmol/m²s · Tair/Tout °C · Rhair/Rhout % · CO2air ppm · Windsp m/s
+# 이름(label)과 인식어(words)는 표준 스키마 역할 기준이라 데이터셋과 무관하다.
+# 단위는 데이터셋마다 다르므로(같은 일사량이라도 W/m²·lux·µmol/m²s 등) 여기
+# 고정하지 않고 레지스트리에 보관된 값을 조회한다. 모르면 표기하지 않는다.
 METRICS: dict[str, dict] = {
-    "power_target": {"label": "에너지 소비", "unit": "kWh/m²/일",
+    "power_target": {"label": "에너지 소비",
                      "words": ["에너지", "전력", "전기", "소비", "사용량",
                                "사용률", "요금", "kwh"]},
-    "light":        {"label": "일사량", "unit": "µmol/m²s",
+    "light":        {"label": "일사량",
                      "words": ["일사", "광량", "햇빛", "조도", "일조", "par"]},
-    "indoor_temp":  {"label": "실내 온도", "unit": "℃",
+    "indoor_temp":  {"label": "실내 온도",
                      "words": ["실내 온도", "실내온도", "온실 온도", "온실온도",
                                "내부 온도", "내부온도"]},
-    "indoor_humid": {"label": "실내 습도", "unit": "%",
+    "indoor_humid": {"label": "실내 습도",
                      "words": ["실내 습도", "실내습도", "온실 습도", "온실습도",
                                "내부 습도", "내부습도"]},
-    "out_temp":     {"label": "외부 기온", "unit": "℃",
+    "out_temp":     {"label": "외부 기온",
                      "words": ["외부 기온", "외부기온", "외기온", "외부 온도",
                                "외부온도", "바깥 온도", "바깥온도", "바깥 기온"]},
-    "out_humid":    {"label": "외부 습도", "unit": "%",
+    "out_humid":    {"label": "외부 습도",
                      "words": ["외부 습도", "외부습도", "외기 습도", "바깥 습도"]},
-    "windspeed":    {"label": "풍속", "unit": "m/s",
+    "windspeed":    {"label": "풍속",
                      "words": ["풍속", "바람"]},
-    "co2":          {"label": "CO2 농도", "unit": "ppm",
+    "co2":          {"label": "CO2 농도",
                      "words": ["co2", "이산화탄소", "탄산가스"]},
-    "pressure":     {"label": "기압", "unit": "",
+    "pressure":     {"label": "기압",
                      "words": ["기압"]},
 }
 
@@ -107,25 +112,44 @@ def _josa(word: str, with_batchim: str, without: str) -> str:
     return word + (with_batchim if _has_batchim(word) else without)
 
 
-def detect_metrics(question: str) -> list[str]:
-    """질문이 어떤 측정 항목을 묻는지 찾는다. 없으면 에너지를 기본값으로 쓴다."""
+def _match_metrics(question: str) -> list[str]:
+    """질문에 명시된 측정 항목. 없으면 빈 목록(기본값을 넣지 않는다)."""
     q = question.lower()
-    found = []
-    for role, spec in METRICS.items():
-        if any(w in q for w in spec["words"]):
-            found.append(role)
+    found = [role for role, spec in METRICS.items()
+             if any(w in q for w in spec["words"])]
     if not found:
         # "5월 27일 온도는?" 처럼 수식어가 없는 경우
-        for word, role in _BARE_FALLBACK.items():
-            if word in q:
-                found.append(role)
-    return found or [TARGET_FEATURE]
+        found = [role for word, role in _BARE_FALLBACK.items() if word in q]
+    return found
+
+
+def detect_metrics(question: str) -> list[str]:
+    """질문이 어떤 측정 항목을 묻는지 찾는다. 없으면 에너지를 기본값으로 쓴다."""
+    return _match_metrics(question) or [TARGET_FEATURE]
+
+
+def sensor_metrics(question: str) -> list[str]:
+    """에너지 외 센서 항목이 명시적으로 언급됐는지.
+
+    예측 대상은 에너지 수요뿐이다. 일사량·온도 같은 센서 항목은 예측하지 않으므로,
+    이런 항목이 언급되면 조회로 처리해야 한다. 그러지 않으면 시점 단어("오늘")
+    때문에 예측 경로로 흘러가 에너지 예측값을 해당 항목인 양 답하게 된다.
+    """
+    return [m for m in _match_metrics(question) if m != TARGET_FEATURE]
+
+
+def unit_of(role: str) -> str:
+    """활성 데이터셋에 기록된 단위. 모르면 빈 문자열(표기하지 않음)."""
+    from .. import registry
+    active = registry.get_active() or {}
+    return (active.get("units") or {}).get(role, "")
 
 
 def _fmt(role: str, value: float) -> str:
-    spec = METRICS.get(role, {"label": role, "unit": ""})
-    unit = f" {spec['unit']}" if spec["unit"] else ""
-    return f"{_josa(spec['label'], '은', '는')} {round(float(value), 2)}{unit}"
+    label = METRICS.get(role, {"label": role})["label"]
+    unit = unit_of(role)
+    tail = f" {unit}" if unit else ""
+    return f"{_josa(label, '은', '는')} {round(float(value), 2)}{tail}"
 
 
 def _compose(head: str, value_parts: list[str], empty_parts: list[str]) -> str:
@@ -197,6 +221,9 @@ def looks_like_history(question: str) -> bool:
     if _RE_EXTREME_MAX.search(q) or _RE_EXTREME_MIN.search(q):
         return True
     if _RE_COVERAGE.search(q):
+        return True
+    # 센서 항목은 예측 대상이 아니므로 언제를 묻든 조회로 처리한다
+    if sensor_metrics(q):
         return True
     if has_past_tense(q) and any(w in q for w in _AGGREGATE + ["얼마"]):
         return True
@@ -316,6 +343,11 @@ def parse_period(question: str, df: pd.DataFrame) -> dict | None:
         if word in question:
             return {"kind": "point", "date": last - pd.Timedelta(days=back)}
 
+    # "오늘·지금·현재"는 실제 오늘이 아니라 마지막 관측일로 답하되, 그 사실을 밝힌다.
+    # 데이터가 과거 기간(2019-12~2020-05)이라 실제 오늘 값은 존재하지 않는다.
+    if _RE_NOW.search(question):
+        return {"kind": "point", "date": last, "is_latest": True}
+
     if _RE_EXTREME_MAX.search(question):
         return {"kind": "extreme", "which": "max"}
     if _RE_EXTREME_MIN.search(question):
@@ -344,9 +376,10 @@ def _stats_text(sub: pd.DataFrame, metrics: list[str], df: pd.DataFrame):
             empty.append(METRICS[role]["label"])
             continue
         st = _stats(sub, role)
-        spec = METRICS.get(role, {"label": role, "unit": ""})
-        unit = f" {spec['unit']}" if spec["unit"] else ""
-        parts.append(f"{_josa(spec['label'], '은', '는')} 평균 {st['avg']}{unit}, "
+        label = METRICS.get(role, {"label": role})["label"]
+        unit = unit_of(role)
+        tail = f" {unit}" if unit else ""
+        parts.append(f"{_josa(label, '은', '는')} 평균 {st['avg']}{tail}, "
                      f"최소 {st['min']}, 최대 {st['max']}")
     return parts, empty
 
@@ -399,11 +432,18 @@ def query(question: str, model_path=None) -> dict | None:
             v = round(float(row[role].iloc[0]), 2)
             values[role] = v
             parts.append(_fmt(role, v))
+        # "오늘"을 물었을 때는 실제 오늘이 아니라 마지막 관측일임을 밝힌다
+        head = (f"가장 최근 기록일인 {d.date()}의 실측"
+                if period.get("is_latest") else f"{d.date()}의 실측")
+        summary = _compose(head, parts, empty)
+        if period.get("is_latest") and parts:
+            summary += " (보유 데이터가 여기까지라 이후 값은 없습니다.)"
         return {**base, "kind": "point", "found": True, "date": str(d.date()),
                 "metrics": metrics, "values": values,
+                "is_latest": bool(period.get("is_latest")),
                 # 단일 항목 조회 시 기존 호출부 호환을 위해 value도 함께 둔다
                 "value": values.get(TARGET_FEATURE, next(iter(values.values()), None)),
-                "summary": _compose(f"{d.date()}의 실측", parts, empty)}
+                "summary": summary}
 
     if period["kind"] == "range":
         sub = df[(df["ts"] >= period["start"]) & (df["ts"] <= period["end"])]

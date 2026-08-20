@@ -48,11 +48,18 @@ def new_ids(name: str) -> tuple[str, str, str]:
 
 def add_dataset(ds_id: str, name: str, table: str, mapping: dict,
                 model_path: str, metrics: dict, rows: int,
-                make_active: bool = True) -> dict:
+                make_active: bool = True, units: dict | None = None) -> dict:
+    """데이터셋을 등록한다.
+
+    units: {역할명: 단위}. 단위는 데이터셋마다 다르므로(같은 일사량이라도 W/m²·
+           lux·µmol/m²s 등) 코드에 고정하지 않고 데이터셋에 함께 보관한다.
+           모르면 비워 두며, 이 경우 응답에서 단위를 표기하지 않는다.
+    """
     reg = _load()
     entry = {
         "id": ds_id, "name": name, "table": table, "mapping": mapping,
         "model_path": model_path, "metrics": metrics, "rows": rows,
+        "units": units or {},
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     reg["datasets"][ds_id] = entry
@@ -115,5 +122,6 @@ def ensure_default() -> dict:
         table=config.SENSOR_TABLE, mapping=wur_mapping(),
         model_path=str(config.MODEL_DIR / "power_lstm.pt"),
         metrics={}, rows=0, make_active=True,
+        units=config.WUR_UNITS,
     )
     return entry

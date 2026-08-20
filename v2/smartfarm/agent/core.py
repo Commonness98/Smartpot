@@ -235,6 +235,10 @@ def _rule_classify(question: str) -> tuple[str, float]:
         # 미래 예측과 무관하므로 아래 판정에서 제외한다.
         if history_mod.is_coverage_question(question):
             return "history", 0.95
+        # 센서 항목(일사량·온도 등)은 예측 대상이 아니다. 앞날을 물어도 조회로
+        # 넘기면 안 되고, 예측하지 않는다는 사실을 알려야 한다.
+        if history_mod.sensor_metrics(question) and any(w in q for w in _FUTURE_WORDS):
+            return "no_forecast", 0.95
         # 과거와 미래를 함께 묻는 질문("제일 많이 쓴 날 알려주고 내일은 어떨지도").
         # 하나만 고르면 나머지를 지어내므로 둘 다 답한다.
         if any(w in q for w in _FUTURE_WORDS):
@@ -421,6 +425,19 @@ def answer(question: str, model_path=None,
         topic = detect_out_of_scope(question) or "해당 주제"
         return {"text": (f"{topic}에 대한 정보는 저장된 데이터에 없어 "
                          f"답변드릴 수 없습니다.\n\n{_SCOPE_NOTE}"),
+                "facts": None, "intent": intent, "intent_meta": cls,
+                "used_llm": False, "show_metrics": False}
+
+    # --- 예측하지 않는 항목의 미래값 문의 ---
+    # 예측 모델의 대상은 에너지 수요뿐이다. 일사량·온도 등을 앞날로 물으면
+    # 에너지 예측값을 그 항목인 양 답하게 되므로 여기서 끊는다.
+    if intent == "no_forecast":
+        asked = history_mod.sensor_metrics(question)
+        names = ", ".join(history_mod.METRICS[m]["label"] for m in asked)
+        return {"text": (f"{names}은(는) 예측하지 않습니다. 예측 대상은 "
+                         f"온실의 에너지 수요 하나뿐입니다.\n\n"
+                         f"과거 실측값은 조회할 수 있습니다 — "
+                         f"\"어제 {names} 얼마였어?\"처럼 물어봐 주세요."),
                 "facts": None, "intent": intent, "intent_meta": cls,
                 "used_llm": False, "show_metrics": False}
 

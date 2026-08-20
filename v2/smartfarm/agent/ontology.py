@@ -105,6 +105,16 @@ with _onto:
         domain = [환경제약]
         range = [bool]
 
+    class 기준백분위(DataProperty):
+        """임계값을 데이터 분포의 백분위로 정의할 때 쓴다(0.75 = 상위 25%).
+
+        온실마다 기후·운영이 달라 절대값을 고정하면 다른 데이터셋에서 규칙이
+        전혀 발동하지 않거나 항상 발동한다. 분포 기준으로 두면 데이터셋이 바뀌어도
+        '이 온실에서 이례적인 날'이라는 의미가 유지된다.
+        """
+        domain = [환경제약]
+        range = [float]
+
     class 기준출처(DataProperty):
         """임계값을 어떻게 정했는지. 근거의 강도를 응답에서 구분하기 위해 쓴다."""
         domain = [환경제약]
@@ -121,11 +131,15 @@ with _onto:
 
 
 def _constraint(name, feature, op, threshold, unit, severity, reason,
-                source, verified=False):
+                source, verified=False, percentile=None):
     c = 환경제약(name)
     c.대상변수 = [feature]
     c.비교연산 = [op]
+    # 백분위 기준이면 임계값은 대상 데이터셋에서 실행 시점에 계산한다.
+    # 여기 값은 계산 불가 시(데이터 부족 등) 쓰는 대체값이다.
     c.임계값 = [float(threshold)]
+    if percentile is not None:
+        c.기준백분위 = [float(percentile)]
     c.단위 = [unit]
     c.심각도 = [severity]
     c.사유 = [reason]
@@ -135,7 +149,7 @@ def _constraint(name, feature, op, threshold, unit, severity, reason,
 
 
 # 임계값 산출 근거 표기
-_SRC_DATA = "본 온실 데이터 상위 25% 수준"
+_SRC_DATA = "활성 데이터셋 분포 기준(실행 시점 산출)"
 _SRC_SAFETY = "작업자 안전 일반 기준(작물별 검증 필요)"
 _SRC_AGRO = "재배 상식에 기반한 잠정값(전문가 검증 필요)"
 
@@ -148,17 +162,17 @@ with _onto:
     온도차과다 = _constraint(
         "온도차과다", "temp_gap", "gt", 16.4, "℃", "caution",
         "실내외 온도차가 커서 온실을 열면 열 손실이 평소보다 큽니다",
-        _SRC_DATA)
+        _SRC_DATA, percentile=0.75)
     풍속과다 = _constraint(
         "풍속과다", "windspeed", "gt", 6.9, "m/s", "caution",
         "바람이 강해 개방 시 환기로 빠져나가는 열이 많아집니다",
-        _SRC_DATA)
+        _SRC_DATA, percentile=0.75)
 
     # --- 작업별 개별 제약: 작업 품질·안전 관점 ---------------------------
     고습도 = _constraint(
         "고습도", "indoor_humid", "gt", 88.0, "%", "caution",
         "실내 습도가 높아 약액이 잘 마르지 않고 약해 위험이 있습니다",
-        _SRC_DATA)
+        _SRC_DATA, percentile=0.75)
     실내고온 = _constraint(
         "실내고온", "indoor_temp", "gt", 35.0, "℃", "caution",
         "실내 온도가 높으면 작업자 온열 부담이 커집니다",
@@ -283,6 +297,7 @@ def constraints_of(task: str) -> list[dict]:
                 "reason": _first(c.사유, ""),
                 "verified": bool(_first(c.검증됨, False)),
                 "source": _first(c.기준출처, ""),
+                "percentile": _first(c.기준백분위, None),
             })
     return out
 

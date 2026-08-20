@@ -149,19 +149,25 @@ def _render_facts(facts: dict | None, verified, key, show_metrics=True) -> None:
         meth = facts.get("method", {})
         unit = fc.get("energy_unit", "")
 
+        # 요금은 타깃 단위를 아는 데이터셋에서만 계산된다(업로드 데이터셋은 미상)
+        cost = sched.get("estimated_cost")
         c1, c2, c3 = st.columns(3)
         c1.metric(f"내일({fc['horizon_days']}일 뒤) 예측",
                   fc["predicted_energy"], sched["level"])
         c2.metric("최근 평균(14일)", fc["recent_avg_energy"])
-        c3.metric("예상 전기요금", f"{sched['estimated_cost']:,.0f}원")
+        c3.metric("예상 전기요금",
+                  f"{cost:,.0f}원" if cost is not None else "—")
 
         # 단위는 지표마다 반복하지 않고 아래에 한 번만 표기한다.
-        bits = [f"단위 {unit}"]
+        bits = [f"단위 {unit}"] if unit else []
         if conf.get("range"):
             bits.append(f"오차 감안 {conf['range'][0]}~{conf['range'][1]}")
         if meth.get("method_label"):
             bits.append(f"산출 {meth['method_label']}")
-        bits.append(f"요금은 {sched.get('area_m2', '-')}m² 기준")
+        if cost is not None:
+            bits.append(f"요금은 {sched.get('area_m2', '-')}m² 기준")
+        else:
+            bits.append(sched.get("cost_basis", "요금 계산 불가"))
         st.caption(" · ".join(bits))
 
         if conf.get("level") == "낮음":
@@ -261,10 +267,16 @@ with tab_dash:
     else:
         st.subheader("내일 에너지 수요 전망")
         sched = recommend_schedule(active_model)
+        cost = sched.get("estimated_cost")
+        unit = sched.get("energy_unit", "")
         c1, c2, c3 = st.columns(3)
         c1.metric("예측 에너지", sched["predicted_energy"], sched["level"])
         c2.metric("최근 평균", sched["recent_avg_energy"])
-        c3.metric("근사 비용(원)", sched["estimated_cost"])
+        c3.metric("근사 비용(원)", f"{cost:,.0f}" if cost is not None else "—")
+        if unit:
+            st.caption(f"단위 {unit}")
+        if cost is None:
+            st.caption(sched.get("cost_basis", ""))
         st.caption(sched["advice"])
 
         st.subheader("최근 일일 에너지 소비 추이")

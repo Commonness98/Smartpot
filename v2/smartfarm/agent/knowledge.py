@@ -37,7 +37,8 @@ def _violates(value: float, op: str, threshold: float) -> bool:
     return False
 
 
-def evaluate(task: str, observations: dict[str, float]) -> dict:
+def evaluate(task: str, observations: dict[str, float],
+             quantile=None) -> dict:
     """작업 제약을 현재 관측값에 대해 평가한다.
 
     observations: {역할명: 값} (예: {"windspeed": 6.1, "indoor_humid": 88})
@@ -57,17 +58,30 @@ def evaluate(task: str, observations: dict[str, float]) -> dict:
         if role not in observations or observations[role] is None:
             continue
         value = float(observations[role])
-        if not _violates(value, c["op"], float(c["threshold"])):
+
+        # 백분위 기준 제약은 활성 데이터셋 분포에서 임계값을 계산한다.
+        # 온실마다 기후·운영이 달라 절대값을 고정하면 다른 데이터셋에서
+        # 규칙이 아예 안 걸리거나 항상 걸린다.
+        threshold, source = float(c["threshold"]), c["source"]
+        if c.get("percentile") is not None and quantile is not None:
+            computed = quantile(role, float(c["percentile"]))
+            if computed is not None:
+                threshold = round(float(computed), 2)
+                source = (f"활성 데이터셋 상위 "
+                          f"{round((1 - float(c['percentile'])) * 100)}% 수준")
+
+        if not _violates(value, c["op"], threshold):
             continue
         findings.append({
             "constraint": c["name"],
             "feature": role,
             "label": ontology.feature_label(role),
             "value": round(value, 2),
-            "threshold": c["threshold"],
+            "threshold": threshold,
             "unit": c["unit"],
             "severity": c["severity"],
             "reason": c["reason"],
+            "source": source,
             "is_provisional": not c["verified"],
         })
 
