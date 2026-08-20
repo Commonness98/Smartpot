@@ -19,12 +19,19 @@ from .planner import _model_path, dataset_frame
 
 # --- 질문에서 과거 조회 의도를 식별하는 신호 ---
 _PAST_MARKERS = ["지난", "저번", "과거", "이전", "그동안", "여태", "지금까지"]
-_PAST_TENSE = ["였", "했었", "썼", "봤", "웠어", "았어", "었어", "던 날", "던가"]
+
+# 과거를 가리키는 상대 날짜 표현. "오늘"은 운영 질문("오늘 방제할까?")과
+# 겹치므로 제외한다.
+_PAST_DAYS = {"어제": 1, "그저께": 2, "그제": 2, "엊그제": 2, "그끄제": 3}
+
+# 한글 종성 ㅆ의 인덱스. 과거 시제 선어말어미(았/었/였/했/썼…)의 표지다.
+_JONG_SS = 20
+_PAST_ENDINGS = "어다니나지는"
 # 최상급 표현. "제일 에너지를 많이 쓴 날"처럼 수식어와 형용사 사이에 다른 말이
 # 끼어드는 경우가 흔해, 단순 문자열 포함 대신 사이 간격을 허용하는 정규식을 쓴다.
 _RE_EXTREME_MAX = re.compile(r"(제일|가장)[^.?!]{0,15}?(많|높|크)|최대|최고|피크")
 _RE_EXTREME_MIN = re.compile(r"(제일|가장)[^.?!]{0,15}?(적|낮|작)|최소|최저")
-_AGGREGATE = ["평균", "합계", "총", "얼마나 썼", "통계", "추이", "비교"]
+_AGGREGATE = ["평균", "합계", "총", "통계", "추이", "비교", "사용", "소비", "썼"]
 
 # --- 날짜 표현 ---
 _RE_FULL_DATE = re.compile(r"(\d{4})\s*[-/.년]\s*(\d{1,2})\s*[-/.월]\s*(\d{1,2})")
@@ -51,14 +58,36 @@ def data_range(model_path=None) -> dict:
     }
 
 
+def has_past_tense(text: str) -> bool:
+    """한국어 과거 시제 표현이 있는지 판단한다.
+
+    "사용했어", "썼나", "어땠지"처럼 활용형이 무한히 많아 어휘 목록으로는
+    계속 누락된다. 과거 선어말어미가 종성 ㅆ으로 실현되는 규칙을 이용해
+    'ㅆ 받침 + 어미'를 찾는다.
+    """
+    for i, ch in enumerate(text[:-1]):
+        code = ord(ch) - 0xAC00
+        if not (0 <= code < 11172):        # 한글 음절이 아님
+            continue
+        if code % 28 != _JONG_SS:
+            continue
+        if ch == "있":                      # "있어"는 현재형이므로 제외
+            continue
+        if text[i + 1] in _PAST_ENDINGS:
+            return True
+    return False
+
+
 def looks_like_history(question: str) -> bool:
     """과거 실측 조회 질문으로 볼 만한지 판단."""
     q = question
     if any(w in q for w in _PAST_MARKERS):
         return True
+    if any(w in q for w in _PAST_DAYS):
+        return True
     if _RE_EXTREME_MAX.search(q) or _RE_EXTREME_MIN.search(q):
         return True
-    if any(w in q for w in _PAST_TENSE) and any(w in q for w in _AGGREGATE + ["얼마"]):
+    if has_past_tense(q) and any(w in q for w in _AGGREGATE + ["얼마"]):
         return True
     # 구체적 날짜/월이 등장하면 과거 조회로 본다(미래 예측은 1일치뿐이므로)
     if _RE_FULL_DATE.search(q) or _RE_MD_KO.search(q) or _RE_MONTH_ONLY.search(q):
@@ -123,8 +152,10 @@ def parse_period(question: str, df: pd.DataFrame) -> dict | None:
         return {"kind": "range", "start": last - pd.Timedelta(days=6),
                 "end": last, "label": "지난 7일"}
 
-    if "어제" in question:
-        return {"kind": "point", "date": last - pd.Timedelta(days=1)}
+    # 상대 날짜(어제·그저께 등)는 데이터 마지막 관측일을 기준으로 센다
+    for word, back in _PAST_DAYS.items():
+        if word in question:
+            return {"kind": "point", "date": last - pd.Timedelta(days=back)}
 
     if _RE_EXTREME_MAX.search(question):
         return {"kind": "extreme", "which": "max"}

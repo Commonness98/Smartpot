@@ -115,10 +115,14 @@ def wants_numbers(question: str) -> bool:
 _CLASSIFY_SYSTEM = (
     "너는 스마트팜 에이전트의 질문 분류기다. 사용자 질문이 다음 중 무엇인지 판단해 "
     "한 단어만 출력한다.\n"
-    "operation: 에너지/전력/요금/설비 가동, 또는 방제·정비 같은 농작업을 "
-    "언제 할지에 관한 질문. 시점(오늘/내일/모레/이번 주)만 언급한 후속 질문 포함.\n"
+    "history: 이미 지나간 기간의 실측값을 묻는 질문. 과거 시제이거나 특정 날짜·"
+    "기간을 가리킨다. 예) '어제는 얼마나 사용했어', '5월 3일 얼마 썼어', "
+    "'지난주 평균은', '제일 많이 쓴 날은', '1월이랑 5월 비교해줘'\n"
+    "operation: 앞으로의 에너지/전력/요금 전망, 또는 방제·정비 같은 농작업을 "
+    "언제 할지에 관한 질문. 예) '내일 방제해도 될까', '모레는 어때'\n"
     "general: 인사, 자기소개, 사용법 문의, 그 외 잡담.\n"
-    "반드시 operation 또는 general 중 하나만 출력한다."
+    "핵심 기준: 이미 지나간 일이면 history, 앞으로의 일이면 operation이다.\n"
+    "반드시 history, operation, general 중 하나만 출력한다."
 )
 
 HELP_TEXT = (
@@ -138,15 +142,18 @@ def _rule_classify(question: str) -> tuple[str, float]:
     """규칙 기반 1차 분류. (의도, 신뢰도 0~1)를 반환한다."""
     q = question.lower().strip()
 
-    # 과거 실측 조회가 최우선. 구체적 날짜·최대/최소·지난 기간 등이 신호이며,
-    # 예측을 거치지 않으므로 다른 의도보다 먼저 판정한다.
-    if history_mod.looks_like_history(question):
-        return "history", 0.9
-
     hit_energy = any(w in q for w in _ENERGY_WORDS)
     hit_task = any(w in q for w in _TASK_WORDS)
     hit_time = any(w in q for w in _TIME_WORDS)
     hit_general = any(w in q for w in _GENERAL_WORDS)
+
+    # 과거 실측 조회가 최우선. 예측을 거치지 않으므로 다른 의도보다 먼저 판정한다.
+    if history_mod.looks_like_history(question):
+        # 과거와 미래가 섞인 질문("어제 방제했는데 내일도 해야 하나?")은 규칙으로
+        # 단정하기 어렵다. 신뢰도를 낮춰 LLM 판단에 맡긴다.
+        if hit_time:
+            return "history", 0.5
+        return "history", 0.9
 
     # 에너지/작업 어휘는 운영 질문의 강한 신호
     if hit_energy or hit_task:
@@ -172,10 +179,11 @@ def _llm_classify(question: str, history: list[dict] | None) -> str | None:
         out = llm_client.chat(msgs, temperature=0.0, max_tokens=8).lower()
     except Exception:
         return None
-    if "operation" in out:
-        return "operation"
-    if "general" in out:
-        return "general"
+    # history를 먼저 확인한다. 과거 조회는 예측을 거치지 않아야 하므로,
+    # 애매할 때 operation으로 흘려보내면 잘못된 예측값을 답하게 된다.
+    for label in ("history", "operation", "general"):
+        if label in out:
+            return label
     return None
 
 
