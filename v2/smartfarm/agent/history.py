@@ -54,6 +54,91 @@ _RE_COVERAGE = re.compile(
     r"데이터\s*(가\s*)?(언제|어느|기간|범위)|자료\s*(가\s*)?(언제|어느|기간|범위)")
 
 
+# --- 조회 가능한 측정 항목 ---
+# 단위는 WUR ReadMe 기재값을 따른다. 임의로 붙이지 않는다.
+#   Tot_PAR µmol/m²s · Tair/Tout °C · Rhair/Rhout % · CO2air ppm · Windsp m/s
+METRICS: dict[str, dict] = {
+    "power_target": {"label": "에너지 소비", "unit": "kWh/m²/일",
+                     "words": ["에너지", "전력", "전기", "소비", "사용량",
+                               "사용률", "요금", "kwh"]},
+    "light":        {"label": "일사량", "unit": "µmol/m²s",
+                     "words": ["일사", "광량", "햇빛", "조도", "일조", "par"]},
+    "indoor_temp":  {"label": "실내 온도", "unit": "℃",
+                     "words": ["실내 온도", "실내온도", "온실 온도", "온실온도",
+                               "내부 온도", "내부온도"]},
+    "indoor_humid": {"label": "실내 습도", "unit": "%",
+                     "words": ["실내 습도", "실내습도", "온실 습도", "온실습도",
+                               "내부 습도", "내부습도"]},
+    "out_temp":     {"label": "외부 기온", "unit": "℃",
+                     "words": ["외부 기온", "외부기온", "외기온", "외부 온도",
+                               "외부온도", "바깥 온도", "바깥온도", "바깥 기온"]},
+    "out_humid":    {"label": "외부 습도", "unit": "%",
+                     "words": ["외부 습도", "외부습도", "외기 습도", "바깥 습도"]},
+    "windspeed":    {"label": "풍속", "unit": "m/s",
+                     "words": ["풍속", "바람"]},
+    "co2":          {"label": "CO2 농도", "unit": "ppm",
+                     "words": ["co2", "이산화탄소", "탄산가스"]},
+    "pressure":     {"label": "기압", "unit": "",
+                     "words": ["기압"]},
+}
+
+# 수식어 없이 "온도"·"습도"만 물으면 온실 내부를 뜻하는 것으로 본다.
+_BARE_FALLBACK = {"온도": "indoor_temp", "습도": "indoor_humid"}
+
+# 데이터가 비어 있는(전부 동일값) 항목을 조회했을 때 알린다.
+_EMPTY_NOTE = "원본 데이터에 값이 없어 조회할 수 없습니다"
+
+
+def _has_batchim(word: str) -> bool:
+    """마지막 글자에 받침이 있는지. 조사(은/는) 선택에 쓴다."""
+    for ch in reversed(word.strip()):
+        code = ord(ch) - 0xAC00
+        if 0 <= code < 11172:              # 한글 음절
+            return code % 28 != 0
+        if ch.isdigit():                   # 숫자로 끝나면 읽는 소리 기준
+            return ch in "0136780"
+        if ch.isalpha():                   # 영문·기호는 받침 없는 것으로 본다
+            return False
+    return False
+
+
+def _josa(word: str, with_batchim: str, without: str) -> str:
+    """단어 뒤에 알맞은 조사를 붙인다(일사량은 / 실내 온도는)."""
+    return word + (with_batchim if _has_batchim(word) else without)
+
+
+def detect_metrics(question: str) -> list[str]:
+    """질문이 어떤 측정 항목을 묻는지 찾는다. 없으면 에너지를 기본값으로 쓴다."""
+    q = question.lower()
+    found = []
+    for role, spec in METRICS.items():
+        if any(w in q for w in spec["words"]):
+            found.append(role)
+    if not found:
+        # "5월 27일 온도는?" 처럼 수식어가 없는 경우
+        for word, role in _BARE_FALLBACK.items():
+            if word in q:
+                found.append(role)
+    return found or [TARGET_FEATURE]
+
+
+def _fmt(role: str, value: float) -> str:
+    spec = METRICS.get(role, {"label": role, "unit": ""})
+    unit = f" {spec['unit']}" if spec["unit"] else ""
+    return f"{_josa(spec['label'], '은', '는')} {round(float(value), 2)}{unit}"
+
+
+def _compose(head: str, value_parts: list[str], empty_parts: list[str]) -> str:
+    """값 문장과 '데이터 없음' 안내를 자연스럽게 잇는다."""
+    out = ""
+    if value_parts:
+        out = f"{head} " + ", ".join(value_parts) + "입니다."
+    if empty_parts:
+        note = ", ".join(_josa(p, "은", "는") for p in empty_parts)
+        out = (out + " " if out else "") + f"{note} {_EMPTY_NOTE}."
+    return out.strip()
+
+
 def _target(df: pd.DataFrame) -> pd.Series:
     return df[TARGET_FEATURE].astype(float)
 
@@ -242,11 +327,28 @@ def parse_period(question: str, df: pd.DataFrame) -> dict | None:
     return None
 
 
-def _stats(sub: pd.DataFrame) -> dict:
-    t = _target(sub)
+def _stats(sub: pd.DataFrame, role: str = TARGET_FEATURE) -> dict:
+    t = sub[role].astype(float)
     return {"days": int(len(sub)), "avg": round(float(t.mean()), 2),
             "min": round(float(t.min()), 2), "max": round(float(t.max()), 2),
             "total": round(float(t.sum()), 2)}
+
+
+def _stats_text(sub: pd.DataFrame, metrics: list[str], df: pd.DataFrame):
+    """요청된 항목별 평균·최소·최대를 한 문장으로 만든다."""
+    parts, empty = [], []
+    for role in metrics:
+        if role not in sub.columns:
+            continue
+        if df[role].astype(float).nunique() <= 1:
+            empty.append(METRICS[role]["label"])
+            continue
+        st = _stats(sub, role)
+        spec = METRICS.get(role, {"label": role, "unit": ""})
+        unit = f" {spec['unit']}" if spec["unit"] else ""
+        parts.append(f"{_josa(spec['label'], '은', '는')} 평균 {st['avg']}{unit}, "
+                     f"최소 {st['min']}, 최대 {st['max']}")
+    return parts, empty
 
 
 def query(question: str, model_path=None) -> dict | None:
@@ -262,6 +364,7 @@ def query(question: str, model_path=None) -> dict | None:
         return None
 
     rng = data_range(model_path)
+    metrics = detect_metrics(question)
     base = {"source": "실측값(예측 아님)", "data_range": rng}
 
     if period["kind"] == "coverage":
@@ -286,10 +389,21 @@ def query(question: str, model_path=None) -> dict | None:
             return {**base, "kind": "point", "found": False,
                     "summary": (f"{d.date()}의 실측 데이터는 없습니다. "
                                 f"보유 기간은 {rng['start']} ~ {rng['end']}입니다.")}
-        v = round(float(_target(row).iloc[0]), 2)
+        values, parts, empty = {}, [], []
+        for role in metrics:
+            if role not in row.columns:
+                continue
+            if df[role].astype(float).nunique() <= 1:   # 원본에 값이 없는 항목
+                empty.append(METRICS[role]["label"])
+                continue
+            v = round(float(row[role].iloc[0]), 2)
+            values[role] = v
+            parts.append(_fmt(role, v))
         return {**base, "kind": "point", "found": True, "date": str(d.date()),
-                "value": v,
-                "summary": f"{d.date()}의 실측 에너지 소비는 {v}입니다."}
+                "metrics": metrics, "values": values,
+                # 단일 항목 조회 시 기존 호출부 호환을 위해 value도 함께 둔다
+                "value": values.get(TARGET_FEATURE, next(iter(values.values()), None)),
+                "summary": _compose(f"{d.date()}의 실측", parts, empty)}
 
     if period["kind"] == "range":
         sub = df[(df["ts"] >= period["start"]) & (df["ts"] <= period["end"])]
@@ -304,16 +418,18 @@ def query(question: str, model_path=None) -> dict | None:
         return {**base, "kind": "range", "found": True, "label": label,
                 "start": str(period["start"].date()), "end": str(period["end"].date()),
                 **s,
-                "summary": (f"{head} {s['days']}일간의 실측 에너지는 "
-                            f"평균 {s['avg']}, 최소 {s['min']}, 최대 {s['max']}입니다.")}
+                "metrics": metrics,
+                "summary": _compose(f"{head} {s['days']}일간의 실측",
+                                    *_stats_text(sub, metrics, df))}
 
     if period["kind"] == "month":
         y, mo = period["year"], period["month"]
         sub = df[(df["ts"].dt.year == y) & (df["ts"].dt.month == mo)]
         s = _stats(sub)
         return {**base, "kind": "month", "found": True, "year": y, "month": mo, **s,
-                "summary": (f"{y}년 {mo}월({s['days']}일)의 실측 에너지는 "
-                            f"평균 {s['avg']}, 최소 {s['min']}, 최대 {s['max']}입니다.")}
+                "metrics": metrics,
+                "summary": _compose(f"{y}년 {mo}월({s['days']}일)의 실측",
+                                    *_stats_text(sub, metrics, df))}
 
     if period["kind"] == "compare_months":
         parts, detail = [], []
