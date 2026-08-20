@@ -134,12 +134,16 @@ def copy_button(text: str, key: str, label: str = "복사") -> None:
     )
 
 
-def _render_facts(facts: dict | None, verified, key) -> None:
-    """어시스턴트 응답에 딸린 예측 지표·근거 데이터를 그린다."""
+def _render_facts(facts: dict | None, verified, key, show_metrics=True) -> None:
+    """어시스턴트 응답에 딸린 예측 지표·근거 데이터를 그린다.
+
+    show_metrics: 사용자가 수치(수요·요금 등)를 실제로 물어봤을 때만 지표 카드를
+                  노출한다. "방제해도 될까?" 같은 권고 질문에는 붙이지 않는다.
+    """
     if not facts:
         return
     # 과거 실측 조회(history) 응답에는 예측 지표가 없다
-    if "forecast" in facts:
+    if show_metrics and "forecast" in facts:
         fc, sched = facts["forecast"], facts["schedule"]
         conf = facts.get("confidence", {})
         meth = facts.get("method", {})
@@ -162,8 +166,6 @@ def _render_facts(facts: dict | None, verified, key) -> None:
 
         if conf.get("level") == "낮음":
             st.warning(f"⚠️ 신뢰도 낮음 — {conf['reasons'][0]}")
-        elif meth.get("method") == "persistence":
-            st.info(f"ℹ️ {meth['method_reason']}")
         st.caption(sched["advice"])
     if verified is False:
         st.caption("ℹ️ 생성 답변에 근거에 없는 수치가 있어 검증된 문장으로 대체했습니다.")
@@ -231,7 +233,8 @@ with tab_chat:
                 with st.chat_message(m["role"]):
                     st.markdown(m["content"])
                     if m["role"] == "assistant":
-                        _render_facts(m.get("facts"), m.get("verified"), key=i)
+                        _render_facts(m.get("facts"), m.get("verified"), key=i,
+                                      show_metrics=m.get("show_metrics", True))
                         copy_button(m["content"], key=f"msg{i}")
             # 자동 스크롤용 앵커(맨 아래)
             st.markdown('<div id="chat-end"></div>', unsafe_allow_html=True)
@@ -247,6 +250,7 @@ with tab_chat:
             st.session_state.messages.append({
                 "role": "assistant", "content": res["text"],
                 "facts": res.get("facts"), "verified": res.get("verified"),
+                "show_metrics": res.get("show_metrics", True),
             })
             st.rerun()
 

@@ -98,6 +98,9 @@ def evaluate(task: str, observations: dict[str, float]) -> dict:
         "task": task,
         "label": spec.get("label", task),
         "essential": spec.get("essential"),
+        # 개방(출입·환기)이 필요한 작업인지. 에너지 수요와 작업 시점을 잇는 근거로 쓴다.
+        "needs_ventilation": spec.get("needs_ventilation", False),
+        "energy_note": spec.get("energy_note"),
         "findings": findings,
         "blocked": any(f["severity"] == "block" for f in findings),
         "has_caution": any(f["severity"] == "caution" for f in findings),

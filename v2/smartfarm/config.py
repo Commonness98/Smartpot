@@ -49,6 +49,12 @@ TARGET_COL = "power_target"    # 일일 총 에너지 소비 예측 타깃(난�
 # 난방(MJ)을 kWh로 환산해 kWh/m²/day 로 통일한다.
 ENERGY_UNIT = "kWh/m²/일"
 
+# 내일 수요를 무엇으로 예측할지.
+#   "model" : 학습된 LSTM을 사용(기본). 과제의 예측 모델을 그대로 쓴다.
+#   "auto"  : 최근 구간 백테스트에서 더 정확한 쪽(LSTM 또는 지속성 기준선)을 자동 채택.
+# 예측 모델이 개선되기 전까지는 "model"로 두고, 성능 비교는 신뢰도 표시로만 알린다.
+FORECAST_METHOD = os.getenv("FORECAST_METHOD", "model")
+
 # 온실 재배 면적(m²). 면적당 값에 곱해 온실 전체 비용을 계산하는 데 쓴다.
 # WUR ReadMe: "5 greenhouse compartments have a total area of 96 m² and a
 # growing area of 62.5 m²". 실제 농가 적용 시 .env의 GREENHOUSE_AREA_M2로 교체.

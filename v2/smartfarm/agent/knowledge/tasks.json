@@ -11,7 +11,6 @@
     "op: gt(초과) / lt(미만) 만 지원. feature 는 표준 스키마 역할명을 쓴다.",
     "severity: block(부적합) / caution(주의)"
   ],
-
   "feature_labels": {
     "power_target": "에너지 수요",
     "out_temp": "외부 기온",
@@ -23,12 +22,26 @@
     "windspeed": "풍속",
     "pressure": "기압"
   },
-
+  "_energy_link": [
+    "에너지 수요와 작업 시점을 잇는 근거.",
+    "난방 수요가 큰 날은 온실을 밀폐해 열을 유지하는 날이다. 이때 출입·환기가",
+    "필요한 작업을 하면 유출된 열을 다시 데워야 해 난방비가 추가로 발생한다.",
+    "따라서 '수요가 높은 날 = 개방 작업의 에너지 손실이 큰 날'로 해석한다.",
+    "needs_ventilation=true 인 작업에만 이 논리를 적용한다."
+  ],
   "tasks": {
     "방제": {
       "label": "방제(약제 살포)",
-      "keywords": ["방제", "약제", "살포", "농약", "소독"],
+      "keywords": [
+        "방제",
+        "약제",
+        "살포",
+        "농약",
+        "소독"
+      ],
       "essential": false,
+      "needs_ventilation": true,
+      "energy_note": "약제 살포 후 환기가 필요해, 난방 수요가 큰 날에는 열 손실이 커집니다",
       "conditions": [
         {
           "feature": "windspeed",
@@ -50,10 +63,15 @@
         }
       ]
     },
-
     "정비": {
       "label": "설비 정비",
-      "keywords": ["정비", "점검", "수리", "교체", "청소"],
+      "keywords": [
+        "정비",
+        "점검",
+        "수리",
+        "교체",
+        "청소"
+      ],
       "essential": false,
       "conditions": [
         {
@@ -65,12 +83,17 @@
           "verified": false,
           "reason": "실내 온도가 높으면 작업자 온열 부담이 커집니다"
         }
-      ]
+      ],
+      "needs_ventilation": true,
+      "energy_note": "설비 정비는 출입이 잦아, 난방 수요가 큰 날에는 열 손실이 커집니다"
     },
-
     "환기": {
       "label": "환기 작업",
-      "keywords": ["환기", "통풍", "창 개폐"],
+      "keywords": [
+        "환기",
+        "통풍",
+        "창 개폐"
+      ],
       "essential": false,
       "conditions": [
         {
@@ -82,7 +105,9 @@
           "verified": false,
           "reason": "외부 기온이 낮을 때 환기하면 난방 부하가 크게 늘어납니다"
         }
-      ]
+      ],
+      "needs_ventilation": true,
+      "energy_note": "환기는 직접 열을 배출하므로 난방 수요가 큰 날에는 부하가 크게 늘어납니다"
     }
   }
 }

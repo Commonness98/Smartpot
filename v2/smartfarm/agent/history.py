@@ -20,8 +20,10 @@ from .planner import _model_path, dataset_frame
 # --- 질문에서 과거 조회 의도를 식별하는 신호 ---
 _PAST_MARKERS = ["지난", "저번", "과거", "이전", "그동안", "여태", "지금까지"]
 _PAST_TENSE = ["였", "했었", "썼", "봤", "웠어", "았어", "었어", "던 날", "던가"]
-_EXTREME_MAX = ["제일 많", "가장 많", "최대", "최고", "피크", "제일 높", "가장 높"]
-_EXTREME_MIN = ["제일 적", "가장 적", "최소", "최저", "제일 낮", "가장 낮"]
+# 최상급 표현. "제일 에너지를 많이 쓴 날"처럼 수식어와 형용사 사이에 다른 말이
+# 끼어드는 경우가 흔해, 단순 문자열 포함 대신 사이 간격을 허용하는 정규식을 쓴다.
+_RE_EXTREME_MAX = re.compile(r"(제일|가장)[^.?!]{0,15}?(많|높|크)|최대|최고|피크")
+_RE_EXTREME_MIN = re.compile(r"(제일|가장)[^.?!]{0,15}?(적|낮|작)|최소|최저")
 _AGGREGATE = ["평균", "합계", "총", "얼마나 썼", "통계", "추이", "비교"]
 
 # --- 날짜 표현 ---
@@ -52,7 +54,9 @@ def data_range(model_path=None) -> dict:
 def looks_like_history(question: str) -> bool:
     """과거 실측 조회 질문으로 볼 만한지 판단."""
     q = question
-    if any(w in q for w in _PAST_MARKERS + _EXTREME_MAX + _EXTREME_MIN):
+    if any(w in q for w in _PAST_MARKERS):
+        return True
+    if _RE_EXTREME_MAX.search(q) or _RE_EXTREME_MIN.search(q):
         return True
     if any(w in q for w in _PAST_TENSE) and any(w in q for w in _AGGREGATE + ["얼마"]):
         return True
@@ -122,9 +126,9 @@ def parse_period(question: str, df: pd.DataFrame) -> dict | None:
     if "어제" in question:
         return {"kind": "point", "date": last - pd.Timedelta(days=1)}
 
-    if any(w in question for w in _EXTREME_MAX):
+    if _RE_EXTREME_MAX.search(question):
         return {"kind": "extreme", "which": "max"}
-    if any(w in question for w in _EXTREME_MIN):
+    if _RE_EXTREME_MIN.search(question):
         return {"kind": "extreme", "which": "min"}
 
     if "전체" in question or "전 기간" in question or "그동안" in question:

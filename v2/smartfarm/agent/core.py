@@ -53,8 +53,10 @@ _GENERAL_WORDS = [
 _SYSTEM_OPERATION = (
     "당신은 스마트팜 운영을 돕는 한국어 AI 에이전트입니다. "
     "주어진 근거 데이터(JSON)에 기반해 농업인이 이해하기 쉬운 운영 권고안을 "
-    "2~4문장으로 제시하세요.\n"
+    "제시하세요.\n"
     "규칙:\n"
+    "- 사용자가 물어본 것에만 답하세요. 최대 3문장이며, 같은 내용을 반복하지 "
+    "마세요. 묻지 않은 항목(요금, 최근 평균 등)은 덧붙이지 마세요.\n"
     "- 숫자와 단위는 근거 데이터에 있는 값만 사용하세요. 없는 값은 만들지 마세요.\n"
     "- 데이터는 일(day) 단위입니다. 시간대(몇 시, 오전/오후, 새벽 등)는 데이터에 "
     "존재하지 않으므로 절대 언급하지 마세요.\n"
@@ -90,11 +92,25 @@ _SYSTEM_HISTORY = (
     "당신은 스마트팜 운영을 돕는 한국어 AI 에이전트입니다. "
     "사용자가 과거 실측 데이터를 물었고, 조회 결과(JSON)가 주어집니다.\n"
     "규칙:\n"
-    "- summary 문장의 숫자와 날짜를 그대로 사용해 1~3문장으로 답하세요.\n"
+    "- summary 문장의 숫자와 날짜를 그대로 사용해 **1~2문장으로 짧게** 답하세요. "
+    "같은 내용을 반복하거나 묻지 않은 내용을 덧붙이지 마세요.\n"
     "- 조회 결과에 없는 값은 절대 만들지 마세요.\n"
     "- 이 값은 예측이 아니라 실제 측정값입니다. 예측·전망으로 표현하지 마세요.\n"
     "- found가 false면 해당 기간의 데이터가 없다는 점과 조회 가능 기간을 안내하세요."
 )
+
+# 예측 수치·요금을 실제로 물어본 질문에서만 지표 카드를 노출한다.
+# ("방제해도 될까?" 같은 권고 질문에 예측/평균/요금 카드까지 붙으면 산만하다.)
+_NUMERIC_ASK = [
+    "얼마", "몇", "수요", "요금", "비용", "가격", "예측", "전망", "사용량",
+    "소비량", "kwh", "평균", "지표", "숫자",
+]
+
+
+def wants_numbers(question: str) -> bool:
+    q = question.lower()
+    return any(w in q for w in _NUMERIC_ASK)
+
 
 _CLASSIFY_SYSTEM = (
     "너는 스마트팜 에이전트의 질문 분류기다. 사용자 질문이 다음 중 무엇인지 판단해 "
@@ -205,10 +221,17 @@ def unsupported_numbers(text: str, facts: dict) -> list[float]:
     return sorted(found - allowed)
 
 
-def _verified_or_fallback(text: str, facts: dict, fallback: str) -> tuple[str, bool]:
-    """검증에 실패하면 근거 그대로의 폴백 문장을 쓴다. (텍스트, 검증통과여부)"""
-    bad = unsupported_numbers(text, facts)
-    if bad:
+def _verified_or_fallback(text: str, facts: dict, fallback: str,
+                          require_value: float | None = None) -> tuple[str, bool]:
+    """검증에 실패하면 근거 그대로의 폴백 문장을 쓴다. (텍스트, 검증통과여부)
+
+    require_value: 반드시 답변에 포함되어야 하는 수치. 사용자가 값을 물었는데
+                   소형 모델이 "예측하기 어렵습니다"로 숫자를 빼는 경우가 있어,
+                   프롬프트 지시에만 의존하지 않고 코드로 확인한다.
+    """
+    if unsupported_numbers(text, facts):
+        return fallback, False
+    if require_value is not None and str(require_value) not in text:
         return fallback, False
     return text, True
 
@@ -227,28 +250,17 @@ def _fallback_operation(facts: dict) -> str:
             f"약 {fc['predicted_energy']} {unit}{band}이고, "
             f"최근 평균 {fc['recent_avg_energy']} 대비 {sched['level']} 수준입니다.")
 
+    # 물어보지 않은 항목(산출 방법·요금·평년 편차)까지 나열하면 장황해지므로,
+    # 예측값 / 권고 / 작업 제약만 담는다. 나머지는 화면 지표와 근거 데이터에 있다.
     parts = [head, sched["advice"]]
-
-    meth = facts.get("method")
-    if meth:
-        parts.append(f"산출 방법: {meth['method_label']}. {meth['method_reason']}")
-
-    drivers = facts.get("drivers") or []
-    if drivers:
-        d = drivers[0]
-        parts.append(f"최근 {d['label']}이(가) 평년 {d['normal_avg']} 대비 "
-                     f"{d['recent_avg']}로 {d['direction']}은 점이 영향을 줄 수 있습니다.")
 
     tc = facts.get("task_check")
     if tc and tc.get("findings"):
         f0 = tc["findings"][0]
         note = "참고 기준" if f0["is_provisional"] else "기준"
         parts.append(f"{tc['label']} 관련: {f0['reason']} "
-                     f"(현재 {f0['label']} {f0['value']}{f0['unit']}, {note} "
-                     f"{f0['threshold']}{f0['unit']}).")
-
-    parts.append(f"근사 비용은 평균 단가 {sched['avg_rate']}원/kWh 기준 "
-                 f"약 {sched['estimated_cost']}원입니다({sched['cost_basis']}).")
+                     f"(현재 {f0['label']} {f0['value']}{f0['unit']}, "
+                     f"{note} {f0['threshold']}{f0['unit']}).")
     return " ".join(parts)
 
 
@@ -314,16 +326,23 @@ def answer(question: str, model_path=None,
                 + [{"role": "user", "content":
                     f"[질문]\n{question}\n\n[근거 데이터(JSON)]\n"
                     + json.dumps(facts, ensure_ascii=False, default=str)}])
-            text, ok = _verified_or_fallback(raw, facts, _fallback_operation(facts))
+            # 수치를 물어본 질문이면 예측값이 답변에 반드시 들어가야 한다.
+            # (권고 질문까지 강제하면 대부분 폴백으로 빠져 답이 획일화된다.
+            #  단위 혼동은 근거에서 온실 전체 환산값을 빼는 것으로 예방한다.)
+            need = (facts["forecast"]["predicted_energy"]
+                    if wants_numbers(question) else None)
+            text, ok = _verified_or_fallback(raw, facts,
+                                             _fallback_operation(facts), need)
             return {"text": text, "facts": facts, "intent": intent,
                     "intent_meta": cls, "task": task, "used_llm": True,
-                    "verified": ok}
+                    "verified": ok, "show_metrics": wants_numbers(question)}
         except Exception as e:
             fb = _fallback_operation(facts)
             return {"text": fb + f"\n\n(LLM 호출 실패로 규칙 기반 응답: {e})",
                     "facts": facts, "intent": intent, "intent_meta": cls,
-                    "task": task, "used_llm": False}
+                    "task": task, "used_llm": False,
+                    "show_metrics": wants_numbers(question)}
 
     return {"text": _fallback_operation(facts), "facts": facts,
             "intent": intent, "intent_meta": cls, "task": task,
-            "used_llm": False}
+            "used_llm": False, "show_metrics": wants_numbers(question)}

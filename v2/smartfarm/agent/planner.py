@@ -275,7 +275,14 @@ def next_day_outlook(model_path=None) -> dict:
     persist = (round(float(df[TARGET_FEATURE].astype(float).iloc[-1]), 2)
                if TARGET_FEATURE in df.columns and len(df) else None)
 
-    if bt.get("available") and bt["better"] == "persistence" and persist is not None:
+    # config.FORECAST_METHOD == "auto" 일 때만 기준선으로 대체한다. 기본값은
+    # "model"이며, 과제의 예측 모델(LSTM)을 그대로 사용한다. 성능 차이는 값을
+    # 바꾸는 대신 신뢰도(forecast_confidence)로 알린다.
+    use_persist = (config.FORECAST_METHOD == "auto"
+                   and bt.get("available") and bt["better"] == "persistence"
+                   and persist is not None)
+
+    if use_persist:
         method = "persistence"
         method_label = "최근 실측 기반(내일 = 직전 실측)"
         chosen = persist
@@ -287,10 +294,7 @@ def next_day_outlook(model_path=None) -> dict:
         method = "model"
         method_label = "학습 모델(LSTM)"
         chosen = model_pred
-        method_reason = (
-            f"최근 {bt['days']}일 검증에서 학습 모델이 단순 기준선보다 정확해 "
-            f"모델 예측을 채택했습니다." if bt.get("available")
-            else "백테스트 데이터가 부족해 학습 모델 예측을 사용했습니다.")
+        method_reason = "과제 예측 모델(LSTM)의 예측값입니다."
 
     fc = {**fc, "predicted_energy": chosen}
     level = _level(chosen, fc["recent_avg_energy"])
@@ -344,7 +348,22 @@ def recommend_schedule(model_path=None, task: str | None = None) -> dict:
 
     # 작업 유형이 지목된 경우 온톨로지 규칙으로 제약을 함께 평가
     if task:
-        result["task_check"] = knowledge.evaluate(task, latest_observations(mp))
+        check = knowledge.evaluate(task, latest_observations(mp))
+        result["task_check"] = check
+
+        # 에너지 수요와 작업 시점의 연결 근거를 명시한다. 개방(출입·환기)이 필요한
+        # 작업만 난방 수요의 영향을 받으므로, 그 경우에만 사유를 덧붙인다.
+        if check.get("needs_ventilation") and conf["level"] != "낮음":
+            note = check.get("energy_note") or ""
+            if level == "높음":
+                result["advice"] = (
+                    f"내일은 에너지 수요가 평소보다 높을 것으로 예상됩니다. "
+                    f"{note}. {check['label']}은(는) 수요가 낮은 날로 미루는 것이 "
+                    f"난방비 측면에서 유리합니다.")
+            elif level == "낮음":
+                result["advice"] = (
+                    f"내일은 에너지 수요가 평소보다 낮을 것으로 예상됩니다. "
+                    f"난방 부담이 적어 {check['label']}을(를) 진행하기 좋은 날입니다.")
     return result
 
 
@@ -366,9 +385,12 @@ def build_facts(model_path=None, task: str | None = None) -> dict:
         "method": {k: sched[k] for k in
                    ("method", "method_label", "method_reason",
                     "model_prediction", "persistence_prediction")},
+        # predicted_energy_total_kwh(온실 전체 환산값)는 화면 표시용이며 여기에
+        # 넣지 않는다. 근거에 비슷한 에너지 수치가 여럿 있으면 소형 모델이
+        # 면적당 값 대신 전체 값을 인용하는 오류가 발생한다.
         "schedule": {k: sched[k] for k in
                      ("level", "advice", "estimated_cost", "avg_rate", "cost_basis",
-                      "area_m2", "predicted_energy_total_kwh")},
+                      "area_m2")},
         "drivers": sched["drivers"],
         "recent_series": recent_series(mp, days=14),
     }
