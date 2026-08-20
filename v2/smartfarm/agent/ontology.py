@@ -105,6 +105,11 @@ with _onto:
         domain = [환경제약]
         range = [bool]
 
+    class 기준출처(DataProperty):
+        """임계값을 어떻게 정했는지. 근거의 강도를 응답에서 구분하기 위해 쓴다."""
+        domain = [환경제약]
+        range = [str]
+
     class 질의어(DataProperty):
         """질문에서 이 작업을 식별하는 표현."""
         domain = [농작업]
@@ -115,7 +120,8 @@ with _onto:
         range = [str]
 
 
-def _constraint(name, feature, op, threshold, unit, severity, reason, verified=False):
+def _constraint(name, feature, op, threshold, unit, severity, reason,
+                source, verified=False):
     c = 환경제약(name)
     c.대상변수 = [feature]
     c.비교연산 = [op]
@@ -123,27 +129,48 @@ def _constraint(name, feature, op, threshold, unit, severity, reason, verified=F
     c.단위 = [unit]
     c.심각도 = [severity]
     c.사유 = [reason]
+    c.기준출처 = [source]
     c.검증됨 = [verified]
     return c
 
 
+# 임계값 산출 근거 표기
+_SRC_DATA = "본 온실 데이터 상위 25% 수준"
+_SRC_SAFETY = "작업자 안전 일반 기준(작물별 검증 필요)"
+_SRC_AGRO = "재배 상식에 기반한 잠정값(전문가 검증 필요)"
+
 with _onto:
-    # --- 제약 개체 -------------------------------------------------------
+    # --- 개방작업 공통 제약: 열 손실 관점 --------------------------------
+    # 온실을 여는 순간 얼마나 많은 열이 빠져나가는지를 좌우하는 조건이다.
+    # 개별 작업이 아니라 개방작업 개념에 붙이므로 방제·정비·환기가 모두 물려받는다.
+    # 임계값은 본 온실 데이터 분포(상위 25%)로 잡았고, 에너지 소비와의 상관은
+    # 온도차 0.71, 풍속 0.38로 확인했다.
+    온도차과다 = _constraint(
+        "온도차과다", "temp_gap", "gt", 16.4, "℃", "caution",
+        "실내외 온도차가 커서 온실을 열면 열 손실이 평소보다 큽니다",
+        _SRC_DATA)
     풍속과다 = _constraint(
-        "풍속과다", "windspeed", "gt", 5.0, "m/s", "block",
-        "풍속이 높으면 약제가 흩날려 방제 효과가 떨어지고 작업자 노출 위험이 있습니다")
+        "풍속과다", "windspeed", "gt", 6.9, "m/s", "caution",
+        "바람이 강해 개방 시 환기로 빠져나가는 열이 많아집니다",
+        _SRC_DATA)
+
+    # --- 작업별 개별 제약: 작업 품질·안전 관점 ---------------------------
     고습도 = _constraint(
-        "고습도", "indoor_humid", "gt", 90.0, "%", "caution",
-        "습도가 매우 높으면 약액이 마르지 않아 약해가 발생할 수 있습니다")
+        "고습도", "indoor_humid", "gt", 88.0, "%", "caution",
+        "실내 습도가 높아 약액이 잘 마르지 않고 약해 위험이 있습니다",
+        _SRC_DATA)
     실내고온 = _constraint(
         "실내고온", "indoor_temp", "gt", 35.0, "℃", "caution",
-        "실내 온도가 높으면 작업자 온열 부담이 커집니다")
-    외기저온 = _constraint(
-        "외기저온", "out_temp", "lt", 5.0, "℃", "caution",
-        "외부 기온이 낮을 때 환기하면 난방 부하가 크게 늘어납니다")
+        "실내 온도가 높으면 작업자 온열 부담이 커집니다",
+        _SRC_SAFETY)
 
     # --- 작업별 개별 제약 및 표기 ----------------------------------------
-    방제.제약있음 = [풍속과다, 고습도]
+    # 개방작업 공통 제약(온도차·풍속)은 여기 다시 쓰지 않는다. 계층에서 상속된다.
+    개방작업.제약있음 = [온도차과다, 풍속과다]
+
+    # 유리온실 내부 살포이므로 실외 풍속은 약제 비산과 직접 관련이 없다.
+    # 실내 조건(습도)만 방제 품질 제약으로 둔다.
+    방제.제약있음 = [고습도]
     방제.표시명 = ["방제(약제 살포)"]
     방제.질의어 = ["방제", "약제", "살포", "농약", "소독"]
 
@@ -151,7 +178,6 @@ with _onto:
     정비.표시명 = ["설비 정비"]
     정비.질의어 = ["정비", "점검", "수리", "교체", "청소"]
 
-    환기작업.제약있음 = [외기저온]
     환기작업.표시명 = ["환기 작업"]
     환기작업.질의어 = ["환기", "통풍", "창 개폐"]
 
@@ -169,6 +195,7 @@ FEATURE_LABELS = {
     "out_humid": "외부 습도", "indoor_temp": "실내 온도",
     "indoor_humid": "실내 습도", "co2": "CO2 농도",
     "light": "일사량", "windspeed": "풍속", "pressure": "기압",
+    "temp_gap": "실내외 온도차",   # 파생 변수(실내 온도 - 외부 기온)
 }
 
 
@@ -255,6 +282,7 @@ def constraints_of(task: str) -> list[dict]:
                 "severity": _first(c.심각도, "caution"),
                 "reason": _first(c.사유, ""),
                 "verified": bool(_first(c.검증됨, False)),
+                "source": _first(c.기준출처, ""),
             })
     return out
 
