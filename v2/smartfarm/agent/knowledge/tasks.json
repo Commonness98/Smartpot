@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "_note": [
+    "작업 유형별 의사결정 지식 정의. 코드를 고치지 않고 이 파일만 수정해",
+    "작업/조건을 추가할 수 있다.",
+    "",
+    "[중요] threshold 값은 도메인 전문가 검증 전의 잠정값이다.",
+    "verified=false 인 조건은 응답에서 '참고' 수준으로만 사용하고 단정하지 않는다.",
+    "실제 재배 기준(작물별 방제 지침 등) 확보 시 값을 갱신하고 verified=true 로 바꾼다.",
+    "",
+    "op: gt(초과) / lt(미만) 만 지원. feature 는 표준 스키마 역할명을 쓴다.",
+    "severity: block(부적합) / caution(주의)"
+  ],
+
+  "feature_labels": {
+    "power_target": "에너지 수요",
+    "out_temp": "외부 기온",
+    "out_humid": "외부 습도",
+    "indoor_temp": "실내 온도",
+    "indoor_humid": "실내 습도",
+    "co2": "CO2 농도",
+    "light": "일사량",
+    "windspeed": "풍속",
+    "pressure": "기압"
+  },
+
+  "tasks": {
+    "방제": {
+      "label": "방제(약제 살포)",
+      "keywords": ["방제", "약제", "살포", "농약", "소독"],
+      "essential": false,
+      "conditions": [
+        {
+          "feature": "windspeed",
+          "op": "gt",
+          "threshold": 5.0,
+          "unit": "m/s",
+          "severity": "block",
+          "verified": false,
+          "reason": "풍속이 높으면 약제가 흩날려 방제 효과가 떨어지고 작업자 노출 위험이 있습니다"
+        },
+        {
+          "feature": "indoor_humid",
+          "op": "gt",
+          "threshold": 90.0,
+          "unit": "%",
+          "severity": "caution",
+          "verified": false,
+          "reason": "습도가 매우 높으면 약액이 마르지 않아 약해가 발생할 수 있습니다"
+        }
+      ]
+    },
+
+    "정비": {
+      "label": "설비 정비",
+      "keywords": ["정비", "점검", "수리", "교체", "청소"],
+      "essential": false,
+      "conditions": [
+        {
+          "feature": "indoor_temp",
+          "op": "gt",
+          "threshold": 35.0,
+          "unit": "℃",
+          "severity": "caution",
+          "verified": false,
+          "reason": "실내 온도가 높으면 작업자 온열 부담이 커집니다"
+        }
+      ]
+    },
+
+    "환기": {
+      "label": "환기 작업",
+      "keywords": ["환기", "통풍", "창 개폐"],
+      "essential": false,
+      "conditions": [
+        {
+          "feature": "out_temp",
+          "op": "lt",
+          "threshold": 5.0,
+          "unit": "℃",
+          "severity": "caution",
+          "verified": false,
+          "reason": "외부 기온이 낮을 때 환기하면 난방 부하가 크게 늘어납니다"
+        }
+      ]
+    }
+  }
+}
