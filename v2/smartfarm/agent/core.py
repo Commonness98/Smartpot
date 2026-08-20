@@ -149,6 +149,10 @@ def _rule_classify(question: str) -> tuple[str, float]:
 
     # 과거 실측 조회가 최우선. 예측을 거치지 않으므로 다른 의도보다 먼저 판정한다.
     if history_mod.looks_like_history(question):
+        # 데이터 보유 기간 질문("언제부터 언제까지 있어?")은 시점 단어를 포함하지만
+        # 미래 예측과 무관하므로 아래 혼동 판정에서 제외한다.
+        if history_mod.is_coverage_question(question):
+            return "history", 0.95
         # 과거와 미래가 섞인 질문("어제 방제했는데 내일도 해야 하나?")은 규칙으로
         # 단정하기 어렵다. 신뢰도를 낮춰 LLM 판단에 맡긴다.
         if hit_time:
@@ -229,18 +233,64 @@ def unsupported_numbers(text: str, facts: dict) -> list[float]:
     return sorted(found - allowed)
 
 
+def trim_sentences(text: str, limit: int) -> str:
+    """문장 수를 제한한다.
+
+    프롬프트로 길이를 지시해도 소형 모델이 자주 초과하고, 뒤로 갈수록 같은 말을
+    반복하거나 근거 없는 문장을 덧붙이는 경향이 있어 코드로 잘라낸다.
+    """
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    parts = [p for p in parts if p]
+    if len(parts) <= limit:
+        return text.strip()
+    return " ".join(parts[:limit])
+
+
+_RE_DATE_ISO = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
+_RE_DATE_KO = re.compile(r"(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일")
+
+
+def _dates_in(text: str) -> set[str]:
+    """텍스트에 등장하는 날짜를 YYYY-MM-DD로 정규화해 모은다."""
+    out = set()
+    for rx in (_RE_DATE_ISO, _RE_DATE_KO):
+        for m in rx.finditer(text):
+            y, mo, d = (int(g) for g in m.groups())
+            out.add(f"{y:04d}-{mo:02d}-{d:02d}")
+    return out
+
+
+def unsupported_dates(text: str, facts: dict) -> list[str]:
+    """응답에 등장하지만 근거에 없는 날짜를 찾아낸다.
+
+    수치 검증만으로는 걸러지지 않는 오류가 있다. 예를 들어 실제 조회 결과가
+    5월 28일인데 모델이 5월 29일이라 답해도, 29가 데이터 기간 끝으로 근거에
+    존재하므로 숫자 검증은 통과해 버린다. 날짜는 따로 대조한다.
+    """
+    allowed = _dates_in(json.dumps(facts, ensure_ascii=False, default=str))
+    return sorted(_dates_in(text) - allowed)
+
+
 def _verified_or_fallback(text: str, facts: dict, fallback: str,
-                          require_value: float | None = None) -> tuple[str, bool]:
+                          require_value: float | None = None,
+                          require_date: str | None = None) -> tuple[str, bool]:
     """검증에 실패하면 근거 그대로의 폴백 문장을 쓴다. (텍스트, 검증통과여부)
 
     require_value: 반드시 답변에 포함되어야 하는 수치. 사용자가 값을 물었는데
                    소형 모델이 "예측하기 어렵습니다"로 숫자를 빼는 경우가 있어,
                    프롬프트 지시에만 의존하지 않고 코드로 확인한다.
+    require_date:  조회 대상 날짜. 답변이 날짜를 언급한다면 반드시 이 날짜여야 한다.
+                   조회 결과는 5월 28일인데 5월 29일이라 답하는 사례가 있었고,
+                   그 날짜도 데이터 기간 안이라 일반 날짜 대조로는 걸러지지 않는다.
     """
-    if unsupported_numbers(text, facts):
+    if unsupported_numbers(text, facts) or unsupported_dates(text, facts):
         return fallback, False
     if require_value is not None and str(require_value) not in text:
         return fallback, False
+    if require_date:
+        mentioned = _dates_in(text)
+        if mentioned and require_date not in mentioned:
+            return fallback, False
     return text, True
 
 
@@ -293,13 +343,18 @@ def answer(question: str, model_path=None,
             facts = {"history": record}
             if llm_client.available():
                 try:
+                    # 대화 이력은 넘기지 않는다. 조회 결과만으로 답이 완결되는데,
+                    # 이전 대화가 섞이면 앞서 조회한 기간을 "데이터가 없다"고
+                    # 단정하는 등 사실과 반대되는 문장을 만들어냈다.
                     raw = llm_client.chat(
-                        [{"role": "system", "content": _SYSTEM_HISTORY}]
-                        + hist_msgs
-                        + [{"role": "user", "content":
+                        [{"role": "system", "content": _SYSTEM_HISTORY},
+                         {"role": "user", "content":
                             f"[질문]\n{question}\n\n[조회 결과(JSON)]\n"
                             + json.dumps(record, ensure_ascii=False, default=str)}])
-                    text, ok = _verified_or_fallback(raw, facts, record["summary"])
+                    raw = trim_sentences(raw, 2)
+                    text, ok = _verified_or_fallback(
+                        raw, facts, record["summary"],
+                        require_date=record.get("date"))
                     return {"text": text, "facts": facts, "intent": "history",
                             "intent_meta": cls, "used_llm": True, "verified": ok}
                 except Exception:
@@ -315,6 +370,7 @@ def answer(question: str, model_path=None,
                     [{"role": "system", "content": _SYSTEM_GENERAL}]
                     + hist_msgs
                     + [{"role": "user", "content": question}])
+                text = trim_sentences(text, 2)
                 return {"text": text, "facts": None, "intent": intent,
                         "intent_meta": cls, "used_llm": True}
             except Exception:
@@ -339,6 +395,7 @@ def answer(question: str, model_path=None,
             #  단위 혼동은 근거에서 온실 전체 환산값을 빼는 것으로 예방한다.)
             need = (facts["forecast"]["predicted_energy"]
                     if wants_numbers(question) else None)
+            raw = trim_sentences(raw, 3)
             text, ok = _verified_or_fallback(raw, facts,
                                              _fallback_operation(facts), need)
             return {"text": text, "facts": facts, "intent": intent,

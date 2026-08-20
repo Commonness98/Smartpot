@@ -40,6 +40,11 @@ _RE_MD_SLASH = re.compile(r"(?<!\d)(\d{1,2})\s*/\s*(\d{1,2})(?!\d)")
 _RE_MONTH_ONLY = re.compile(r"(\d{1,2})\s*월(?!\s*\d)")
 _RE_RECENT_N = re.compile(r"(?:최근|지난)\s*(\d{1,3})\s*일")
 
+# 보유 데이터 기간 자체를 묻는 질문
+_RE_COVERAGE = re.compile(
+    r"언제\s*부터|언제\s*까지|어느\s*기간|기간이\s*(어떻게|얼마)|"
+    r"데이터\s*(가\s*)?(언제|어느|기간|범위)|자료\s*(가\s*)?(언제|어느|기간|범위)")
+
 
 def _target(df: pd.DataFrame) -> pd.Series:
     return df[TARGET_FEATURE].astype(float)
@@ -78,6 +83,15 @@ def has_past_tense(text: str) -> bool:
     return False
 
 
+def is_coverage_question(question: str) -> bool:
+    """보유 데이터 기간 자체를 묻는 질문인지.
+
+    "언제부터 언제까지 데이터 있어?"처럼 시점 단어를 포함하지만 미래 예측과는
+    무관하다. 호출부에서 시점 단어로 인한 의도 혼동을 피하는 데 쓴다.
+    """
+    return bool(_RE_COVERAGE.search(question))
+
+
 def looks_like_history(question: str) -> bool:
     """과거 실측 조회 질문으로 볼 만한지 판단."""
     q = question
@@ -86,6 +100,8 @@ def looks_like_history(question: str) -> bool:
     if any(w in q for w in _PAST_DAYS):
         return True
     if _RE_EXTREME_MAX.search(q) or _RE_EXTREME_MIN.search(q):
+        return True
+    if _RE_COVERAGE.search(q):
         return True
     if has_past_tense(q) and any(w in q for w in _AGGREGATE + ["얼마"]):
         return True
@@ -109,24 +125,54 @@ def _resolve_year(month: int, day: int | None, df: pd.DataFrame) -> int | None:
     return None
 
 
+def _find_dates(question: str, df: pd.DataFrame) -> list:
+    """질문에 등장하는 모든 날짜를 나온 순서대로 찾는다.
+
+    "1월 3일부터 2월 3일까지"처럼 날짜가 둘 이상이면 기간 조회로 해석해야 한다.
+    첫 날짜만 보고 하루치를 답하면 기간 평균을 물었는데 단일 값을 주게 된다.
+    반환 항목은 (Timestamp) 또는 범위 밖이면 ("out", 표기문자열).
+    """
+    found: list[tuple[int, object]] = []
+    spans: list[tuple[int, int]] = []
+
+    for m in _RE_FULL_DATE.finditer(question):
+        y, mo, d = (int(g) for g in m.groups())
+        found.append((m.start(), pd.Timestamp(y, mo, d)))
+        spans.append((m.start(), m.end()))
+
+    for rx in (_RE_MD_KO, _RE_MD_SLASH):
+        for m in rx.finditer(question):
+            # 연-월-일 표기 안에 포함된 부분 일치는 건너뛴다
+            if any(s <= m.start() < e for s, e in spans):
+                continue
+            mo, d = int(m.group(1)), int(m.group(2))
+            y = _resolve_year(mo, d, df)
+            found.append((m.start(),
+                          pd.Timestamp(y, mo, d) if y else ("out", f"{mo}월 {d}일")))
+            spans.append((m.start(), m.end()))
+
+    found.sort(key=lambda t: t[0])
+    return [v for _, v in found]
+
+
 def parse_period(question: str, df: pd.DataFrame) -> dict | None:
     """질문에서 조회 기간을 해석한다. 실패 시 None."""
     last = df["ts"].max()
 
-    m = _RE_FULL_DATE.search(question)
-    if m:
-        y, mo, d = (int(g) for g in m.groups())
-        return {"kind": "point", "date": pd.Timestamp(y, mo, d)}
+    # 보유 데이터 기간 자체를 묻는 질문
+    if _RE_COVERAGE.search(question):
+        return {"kind": "coverage"}
 
-    for rx in (_RE_MD_KO, _RE_MD_SLASH):
-        m = rx.search(question)
-        if m:
-            mo, d = int(m.group(1)), int(m.group(2))
-            y = _resolve_year(mo, d, df)
-            if y:
-                return {"kind": "point", "date": pd.Timestamp(y, mo, d)}
-            # 데이터 범위 밖의 날짜 — 조용히 실패하지 않고 안내한다
-            return {"kind": "out_of_range", "text": f"{mo}월 {d}일"}
+    dates = _find_dates(question, df)
+    bad = [d for d in dates if isinstance(d, tuple)]
+    if bad:
+        return {"kind": "out_of_range", "text": bad[0][1]}
+    if len(dates) >= 2:
+        start, end = sorted(dates[:2])
+        return {"kind": "range", "start": start, "end": end,
+                "label": f"{start.date()}~{end.date()}"}
+    if len(dates) == 1:
+        return {"kind": "point", "date": dates[0]}
 
     # 월 단위 (여러 개면 비교)
     months = [int(x) for x in _RE_MONTH_ONLY.findall(question)]
@@ -190,6 +236,16 @@ def query(question: str, model_path=None) -> dict | None:
     rng = data_range(model_path)
     base = {"source": "실측값(예측 아님)", "data_range": rng}
 
+    if period["kind"] == "coverage":
+        t = _target(df)
+        return {**base, "kind": "coverage", "found": True,
+                "start": rng["start"], "end": rng["end"], "days": rng["rows"],
+                "summary": (f"보유 데이터는 {rng['start']}부터 {rng['end']}까지 "
+                            f"총 {rng['rows']}일치입니다. 이 기간 실측 에너지는 "
+                            f"평균 {round(float(t.mean()), 2)}, "
+                            f"최소 {round(float(t.min()), 2)}, "
+                            f"최대 {round(float(t.max()), 2)}입니다.")}
+
     if period["kind"] == "out_of_range":
         return {**base, "kind": "out_of_range", "found": False,
                 "summary": (f"{period['text']}은(는) 보유 데이터 기간을 벗어납니다. "
@@ -214,12 +270,14 @@ def query(question: str, model_path=None) -> dict | None:
                     "summary": "해당 기간의 실측 데이터가 없습니다."}
         s = _stats(sub)
         label = period.get("label", "해당 기간")
+        span = f"{period['start'].date()}~{period['end'].date()}"
+        # label이 이미 날짜 범위면 중복 표기하지 않는다
+        head = span if label == span else f"{label}({span})"
         return {**base, "kind": "range", "found": True, "label": label,
                 "start": str(period["start"].date()), "end": str(period["end"].date()),
                 **s,
-                "summary": (f"{label}({period['start'].date()}~{period['end'].date()}, "
-                            f"{s['days']}일)의 실측 에너지는 평균 {s['avg']}, "
-                            f"최소 {s['min']}, 최대 {s['max']}입니다.")}
+                "summary": (f"{head} {s['days']}일간의 실측 에너지는 "
+                            f"평균 {s['avg']}, 최소 {s['min']}, 최대 {s['max']}입니다.")}
 
     if period["kind"] == "month":
         y, mo = period["year"], period["month"]
