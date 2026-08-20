@@ -37,7 +37,15 @@ _AGGREGATE = ["평균", "합계", "총", "통계", "추이", "비교", "사용",
 _RE_FULL_DATE = re.compile(r"(\d{4})\s*[-/.년]\s*(\d{1,2})\s*[-/.월]\s*(\d{1,2})")
 _RE_MD_KO = re.compile(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일")
 _RE_MD_SLASH = re.compile(r"(?<!\d)(\d{1,2})\s*/\s*(\d{1,2})(?!\d)")
+_RE_YEAR_MONTH = re.compile(r"(\d{4})\s*년\s*(\d{1,2})\s*월")
 _RE_MONTH_ONLY = re.compile(r"(\d{1,2})\s*월(?!\s*\d)")
+
+# 상대 월 표현. 데이터의 마지막 관측월을 '이번 달'로 본다.
+_REL_MONTH = {
+    "지지난달": 2, "지지난 달": 2,
+    "지난달": 1, "지난 달": 1, "저번달": 1, "저번 달": 1, "전달": 1, "전 달": 1,
+    "이번달": 0, "이번 달": 0, "이달": 0,
+}
 _RE_RECENT_N = re.compile(r"(?:최근|지난)\s*(\d{1,3})\s*일")
 
 # 보유 데이터 기간 자체를 묻는 질문
@@ -96,6 +104,8 @@ def looks_like_history(question: str) -> bool:
     """과거 실측 조회 질문으로 볼 만한지 판단."""
     q = question
     if any(w in q for w in _PAST_MARKERS):
+        return True
+    if any(w in q for w in _REL_MONTH):
         return True
     if any(w in q for w in _PAST_DAYS):
         return True
@@ -173,6 +183,24 @@ def parse_period(question: str, df: pd.DataFrame) -> dict | None:
                 "label": f"{start.date()}~{end.date()}"}
     if len(dates) == 1:
         return {"kind": "point", "date": dates[0]}
+
+    # 연도까지 명시된 월("2021년 1월"). 연도를 무시하고 데이터에 있는 해로
+    # 답해버리면 묻지 않은 기간을 답하게 되므로 먼저 처리한다.
+    m = _RE_YEAR_MONTH.search(question)
+    if m:
+        y, mo = int(m.group(1)), int(m.group(2))
+        if df[(df["ts"].dt.year == y) & (df["ts"].dt.month == mo)].empty:
+            return {"kind": "out_of_range", "text": f"{y}년 {mo}월"}
+        return {"kind": "month", "year": y, "month": mo}
+
+    # 상대 월 표현(지난달·이번달 등). 데이터 마지막 관측월이 기준이다.
+    for word, back in _REL_MONTH.items():
+        if word in question:
+            anchor = (last.to_period("M") - back)
+            y, mo = anchor.year, anchor.month
+            if df[(df["ts"].dt.year == y) & (df["ts"].dt.month == mo)].empty:
+                return {"kind": "out_of_range", "text": f"{y}년 {mo}월"}
+            return {"kind": "month", "year": y, "month": mo}
 
     # 월 단위 (여러 개면 비교)
     months = [int(x) for x in _RE_MONTH_ONLY.findall(question)]

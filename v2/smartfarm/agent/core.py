@@ -44,6 +44,9 @@ _TIME_WORDS = [
     "오늘", "내일", "모레", "글피", "이번 주", "이번주", "다음 주", "다음주",
     "주말", "며칠", "언제", "날짜", "요일",
 ]
+# 명확히 앞날을 가리키는 표현만 모은다. "언제"·"며칠"은 과거 질문
+# ("제일 많이 쓴 날은 언제야?")에도 쓰여 미래 신호로 볼 수 없다.
+_FUTURE_WORDS = ["내일", "모레", "글피", "다음주", "다음 주", "앞으로", "향후"]
 # 인사·자기소개 등 명백한 일반 질문
 _GENERAL_WORDS = [
     "안녕", "반가", "누구", "뭐야", "뭐 할 수", "뭘 할 수", "소개", "도움말",
@@ -123,6 +126,30 @@ _SCOPE_NOTE = (
 )
 
 
+# "전기세 아끼려면?" 같은 방법 문의. 예측 수치를 나열해봐야 답이 되지 않으므로,
+# 이 시스템이 실제로 근거를 갖고 말할 수 있는 절감 방법만 제시한다.
+_SAVING_ASK = ["아끼", "절감", "절약", "줄이", "낮추", "싸게", "저렴"]
+
+SAVING_ADVICE = (
+    "이 시스템이 근거를 갖고 안내할 수 있는 절감 방법은 다음과 같습니다.\n\n"
+    "1. **난방 수요가 큰 날에는 개방 작업을 피하세요.** 난방을 많이 돌리는 날은 "
+    "온실을 밀폐해 열을 유지하는 날입니다. 이때 방제·정비처럼 출입과 환기가 "
+    "필요한 작업을 하면 빠져나간 열을 다시 데워야 해 난방비가 추가로 듭니다.\n"
+    "2. **비필수 작업은 수요가 낮은 날로 모으세요.** \"내일 방제해도 될까?\"처럼 "
+    "물어보시면 그날 수요 수준을 근거로 판단해 드립니다.\n"
+    "3. **과거 사용량으로 패턴을 확인하세요.** \"1월이랑 5월 비교해줘\"처럼 "
+    "물어보시면 어느 시기에 소비가 몰리는지 볼 수 있습니다.\n\n"
+    "다만 설비 교체나 단열 개선 같은 시설 투자 효과는 저장된 데이터로 판단할 수 "
+    "없어 안내드리기 어렵습니다."
+)
+
+
+def is_saving_question(question: str) -> bool:
+    q = question.lower()
+    return (any(w in q for w in _SAVING_ASK)
+            and any(w in q for w in ("전기", "전력", "요금", "비용", "에너지", "난방")))
+
+
 def detect_out_of_scope(question: str) -> str | None:
     """보유 데이터로 답할 수 없는 주제인지 판별한다. 해당 분야명 또는 None."""
     q = question.lower()
@@ -161,6 +188,16 @@ _CLASSIFY_SYSTEM = (
     "반드시 history, operation, general 중 하나만 출력한다."
 )
 
+HISTORY_UNPARSED = (
+    "과거 데이터를 찾으시는 것 같은데, 어느 시점인지 파악하지 못했습니다. "
+    "이렇게 물어봐 주세요:\n"
+    "- \"5월 3일 얼마 썼어?\" (특정 날짜)\n"
+    "- \"1월 3일부터 2월 3일까지 평균은?\" (기간)\n"
+    "- \"지난달 평균은?\", \"지난주는?\" (상대 기간)\n"
+    "- \"제일 많이 쓴 날은?\" (최대·최소)\n"
+    "- \"언제부터 언제까지 데이터가 있어?\" (보유 기간)"
+)
+
 HELP_TEXT = (
     "안녕하세요! 저는 스마트팜 에너지 운영을 돕는 AI 에이전트입니다. "
     "온실의 일일 에너지(난방+전기) 수요를 예측해 방제·정비 같은 비필수 작업을 "
@@ -183,6 +220,10 @@ def _rule_classify(question: str) -> tuple[str, float]:
     if detect_out_of_scope(question):
         return "out_of_scope", 0.95
 
+    # 절감 방법 문의는 예측값 나열로 답이 되지 않는다. 전용 안내로 분기한다.
+    if is_saving_question(question):
+        return "saving", 0.9
+
     hit_energy = any(w in q for w in _ENERGY_WORDS)
     hit_task = any(w in q for w in _TASK_WORDS)
     hit_time = any(w in q for w in _TIME_WORDS)
@@ -191,13 +232,13 @@ def _rule_classify(question: str) -> tuple[str, float]:
     # 과거 실측 조회가 최우선. 예측을 거치지 않으므로 다른 의도보다 먼저 판정한다.
     if history_mod.looks_like_history(question):
         # 데이터 보유 기간 질문("언제부터 언제까지 있어?")은 시점 단어를 포함하지만
-        # 미래 예측과 무관하므로 아래 혼동 판정에서 제외한다.
+        # 미래 예측과 무관하므로 아래 판정에서 제외한다.
         if history_mod.is_coverage_question(question):
             return "history", 0.95
-        # 과거와 미래가 섞인 질문("어제 방제했는데 내일도 해야 하나?")은 규칙으로
-        # 단정하기 어렵다. 신뢰도를 낮춰 LLM 판단에 맡긴다.
-        if hit_time:
-            return "history", 0.5
+        # 과거와 미래를 함께 묻는 질문("제일 많이 쓴 날 알려주고 내일은 어떨지도").
+        # 하나만 고르면 나머지를 지어내므로 둘 다 답한다.
+        if any(w in q for w in _FUTURE_WORDS):
+            return "both", 0.9
         return "history", 0.9
 
     # 에너지/작업 어휘는 운영 질문의 강한 신호
@@ -383,13 +424,26 @@ def answer(question: str, model_path=None,
                 "facts": None, "intent": intent, "intent_meta": cls,
                 "used_llm": False, "show_metrics": False}
 
+    # --- 절감 방법 문의: 근거 있는 방법만 고정 문구로 안내 ---
+    if intent == "saving":
+        return {"text": SAVING_ADVICE, "facts": None, "intent": intent,
+                "intent_meta": cls, "used_llm": False, "show_metrics": False}
+
     # --- 과거 실측 조회: 예측 모델을 거치지 않고 DB 값을 그대로 답한다 ---
-    if intent == "history":
+    if intent in ("history", "both"):
         record = history_mod.query(question, model_path=model_path)
+
         if record is None:
-            # 기간 해석 실패 → 운영 질문으로 넘겨 평소 로직을 태운다
-            intent = "operation"
-        else:
+            if intent == "history":
+                # 과거를 물은 게 분명한데 조회 대상을 특정하지 못한 경우.
+                # 예측 경로로 넘기면 묻지도 않은 내일 수요를 자신 있게 답하게 되므로
+                # 무엇을 물었는지 되묻는다.
+                return {"text": HISTORY_UNPARSED, "facts": None,
+                        "intent": "history", "intent_meta": cls,
+                        "used_llm": False, "show_metrics": False}
+            intent = "operation"          # both인데 과거 부분만 실패 → 예측만 답한다
+
+        elif intent == "history":
             facts = {"history": record}
             if llm_client.available():
                 try:
@@ -411,6 +465,26 @@ def answer(question: str, model_path=None,
                     pass
             return {"text": record["summary"], "facts": facts, "intent": "history",
                     "intent_meta": cls, "used_llm": False}
+
+        else:
+            # both: 과거 조회 결과와 내일 전망을 함께 답한다. 생성에 맡기면 한쪽을
+            # 지어내므로(예: 최대 사용일을 엉뚱한 날짜로) 확정된 문장을 조합한다.
+            fc_facts = build_facts(model_path=model_path,
+                                   task=knowledge.find_task(question))
+            fc = fc_facts["forecast"]
+            conf = fc_facts["confidence"]
+            rng = conf.get("range")
+            band = f" (예상 범위 {rng[0]}~{rng[1]})" if rng else ""
+            tail = (f"내일({fc['horizon_days']}일 뒤) 예상 에너지 수요는 "
+                    f"약 {fc['predicted_energy']} {fc.get('energy_unit', '')}{band}"
+                    f"로, 최근 평균 {fc['recent_avg_energy']} 대비 "
+                    f"{fc_facts['schedule']['level']} 수준입니다.")
+            if conf.get("level") == "낮음":
+                tail += " 다만 예측 신뢰도가 낮아 오차가 클 수 있습니다."
+            return {"text": f"{record['summary']} {tail}",
+                    "facts": {"history": record, **fc_facts},
+                    "intent": "both", "intent_meta": cls,
+                    "used_llm": False, "show_metrics": True}
 
     # --- 일반/인사 질문: 추천 데이터 주입 없이 역할 안내 ---
     if intent == "general":
