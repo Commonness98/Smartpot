@@ -99,6 +99,42 @@ _SYSTEM_HISTORY = (
     "- found가 false면 해당 기간의 데이터가 없다는 점과 조회 가능 기간을 안내하세요."
 )
 
+# --- 답변 범위 밖 주제 -----------------------------------------------------
+# 이 시스템이 가진 데이터는 에너지 소비 실측과 환경 센서 실측뿐이다. 그 밖의
+# 주제를 물으면 LLM이 손에 쥔 에너지 수치를 질문에 억지로 끼워맞춰 답을 지어낸다
+# (예: "병해충 있어?" -> 어제 에너지값 0.26을 "병해충 예측"이라고 제시).
+# 프롬프트의 금지 지시만으로는 막히지 않아, 아예 LLM에 넘기지 않는다.
+_OUT_OF_SCOPE = {
+    "병해충": ["병해충", "해충", "벌레", "진딧물", "응애", "총채", "곰팡이",
+              "흰가루", "잿빛", "감염", "발병", "병징"],
+    "생육·수확": ["생육", "수확", "착과", "개화", "열매", "당도", "품질",
+                "상품성", "출하", "파종", "정식"],
+    "날씨 예보": ["날씨", "예보", "강수", "비 와", "비가 와", "눈이 와", "태풍"],
+    "토양·양액": ["토양", "양액", "비료", "시비", "관수량", "급액", "배지"],
+}
+
+_SCOPE_NOTE = (
+    "이 시스템이 다루는 데이터는 온실의 **일일 에너지 소비 실측값**과 "
+    "**환경 센서 실측값**(실내 온도·습도·CO2·일사량, 외부 기온·습도·풍속)입니다.\n\n"
+    "다음은 답변드릴 수 있습니다:\n"
+    "- 과거 특정 날짜·기간의 에너지 사용량\n"
+    "- 내일 에너지 수요 예측과 예상 전기요금\n"
+    "- 방제·정비 등 비필수 작업의 시점 권고"
+)
+
+
+def detect_out_of_scope(question: str) -> str | None:
+    """보유 데이터로 답할 수 없는 주제인지 판별한다. 해당 분야명 또는 None."""
+    q = question.lower()
+    # 작업 시점 질문은 범위 안이다("병해충 방제 언제 할까?" 등)
+    if any(w in q for w in _TASK_WORDS):
+        return None
+    for topic, words in _OUT_OF_SCOPE.items():
+        if any(w in q for w in words):
+            return topic
+    return None
+
+
 # 예측 수치·요금을 실제로 물어본 질문에서만 지표 카드를 노출한다.
 # ("방제해도 될까?" 같은 권고 질문에 예측/평균/요금 카드까지 붙으면 산만하다.)
 _NUMERIC_ASK = [
@@ -141,6 +177,11 @@ _HISTORY_TURNS = 6
 def _rule_classify(question: str) -> tuple[str, float]:
     """규칙 기반 1차 분류. (의도, 신뢰도 0~1)를 반환한다."""
     q = question.lower().strip()
+
+    # 보유 데이터로 답할 수 없는 주제는 다른 판정보다 먼저 걸러낸다.
+    # 시점 단어("언제", "오늘")만으로 운영 질문이 되어 엉뚱한 답을 만들던 경로 차단.
+    if detect_out_of_scope(question):
+        return "out_of_scope", 0.95
 
     hit_energy = any(w in q for w in _ENERGY_WORDS)
     hit_task = any(w in q for w in _TASK_WORDS)
@@ -332,6 +373,15 @@ def answer(question: str, model_path=None,
     cls = classify(question, history)
     intent = cls["intent"]
     hist_msgs = _history_messages(history)
+
+    # --- 답변 범위 밖: LLM을 거치지 않고 고정 문구로 답한다 ---
+    # 근거가 없는 주제라 생성에 맡기면 반드시 지어낸다. 정직하게 한계를 밝힌다.
+    if intent == "out_of_scope":
+        topic = detect_out_of_scope(question) or "해당 주제"
+        return {"text": (f"{topic}에 대한 정보는 저장된 데이터에 없어 "
+                         f"답변드릴 수 없습니다.\n\n{_SCOPE_NOTE}"),
+                "facts": None, "intent": intent, "intent_meta": cls,
+                "used_llm": False, "show_metrics": False}
 
     # --- 과거 실측 조회: 예측 모델을 거치지 않고 DB 값을 그대로 답한다 ---
     if intent == "history":
