@@ -12,3 +12,4 @@ py7zr>=0.21         # WUR 온실 데이터셋(.7z) 압축 해제(순수 파이�
 streamlit>=1.30     # 대화형 웹 UI
 plotly>=5.20        # 시각화
 python-dotenv>=1.0  # 환경변수 로딩
+owlready2>=0.46  # 작업 의사결정 온톨로지(OWL) 정의·계층 추론

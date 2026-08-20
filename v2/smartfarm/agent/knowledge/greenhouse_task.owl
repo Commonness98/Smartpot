@@ -1,0 +1,370 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xml:base="http://smartfarm.gitrc/ontology/greenhouse-task.owl"
+         xmlns="http://smartfarm.gitrc/ontology/greenhouse-task.owl#">
+
+<owl:Ontology rdf:about="http://smartfarm.gitrc/ontology/greenhouse-task.owl"/>
+
+<owl:ObjectProperty rdf:about="#제약있음">
+  <rdfs:domain rdf:resource="#농작업"/>
+  <rdfs:range rdf:resource="#환경제약"/>
+</owl:ObjectProperty>
+
+<owl:DatatypeProperty rdf:about="#대상변수">
+  <rdfs:domain rdf:resource="#환경제약"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#비교연산">
+  <rdfs:domain rdf:resource="#환경제약"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#임계값">
+  <rdfs:domain rdf:resource="#환경제약"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#단위">
+  <rdfs:domain rdf:resource="#환경제약"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#심각도">
+  <rdfs:domain rdf:resource="#환경제약"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#사유">
+  <rdfs:domain rdf:resource="#환경제약"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#검증됨">
+  <rdfs:domain rdf:resource="#환경제약"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#질의어">
+  <rdfs:domain rdf:resource="#농작업"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<owl:DatatypeProperty rdf:about="#표시명">
+  <rdfs:domain rdf:resource="#농작업"/>
+  <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+</owl:DatatypeProperty>
+
+<owl:Class rdf:about="#농작업">
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+</owl:Class>
+
+<owl:Class rdf:about="#필수작업">
+  <rdfs:subClassOf rdf:resource="#농작업"/>
+</owl:Class>
+
+<owl:Class rdf:about="#비필수작업">
+  <rdfs:subClassOf rdf:resource="#농작업"/>
+</owl:Class>
+
+<owl:Class rdf:about="#개방작업">
+  <rdfs:subClassOf rdf:resource="#비필수작업"/>
+</owl:Class>
+
+<owl:Class rdf:about="#밀폐작업">
+  <rdfs:subClassOf rdf:resource="#비필수작업"/>
+</owl:Class>
+
+<owl:Class rdf:about="#방제">
+  <rdfs:subClassOf rdf:resource="#개방작업"/>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#제약있음"/>
+      <owl:hasValue rdf:resource="#풍속과다"/>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#제약있음"/>
+      <owl:hasValue rdf:resource="#고습도"/>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#표시명"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">방제(약제 살포)</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">살포</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">농약</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">방제</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">소독</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">약제</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+</owl:Class>
+
+<owl:Class rdf:about="#정비">
+  <rdfs:subClassOf rdf:resource="#개방작업"/>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#제약있음"/>
+      <owl:hasValue rdf:resource="#실내고온"/>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#표시명"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">설비 정비</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">정비</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">수리</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">청소</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">점검</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">교체</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+</owl:Class>
+
+<owl:Class rdf:about="#환기작업">
+  <rdfs:subClassOf rdf:resource="#개방작업"/>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#제약있음"/>
+      <owl:hasValue rdf:resource="#외기저온"/>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#표시명"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">환기 작업</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">창 개폐</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">환기</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">통풍</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+</owl:Class>
+
+<owl:Class rdf:about="#점검기록">
+  <rdfs:subClassOf rdf:resource="#밀폐작업"/>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#표시명"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">생육 기록·계측</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">기록</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">측정</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">관찰</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">계측</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+</owl:Class>
+
+<owl:Class rdf:about="#관수">
+  <rdfs:subClassOf rdf:resource="#필수작업"/>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#표시명"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">관수(급액)</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">급액</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">물주기</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">灌水</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+  <rdfs:subClassOf>
+    <owl:Restriction>
+      <owl:onProperty rdf:resource="#질의어"/>
+      <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#string">관수</owl:hasValue>
+    </owl:Restriction>
+  </rdfs:subClassOf>
+</owl:Class>
+
+<owl:Class rdf:about="#환경제약">
+  <rdfs:subClassOf rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+</owl:Class>
+
+<owl:NamedIndividual rdf:about="#풍속과다">
+  <rdf:type rdf:resource="#환경제약"/>
+  <rdf:type>
+    <owl:Restriction>
+      <owl:onProperty>
+        <rdf:Description>
+          <owl:inverseOf rdf:resource="#제약있음"/>
+        </rdf:Description>
+      </owl:onProperty>
+      <owl:someValuesFrom rdf:resource="#방제"/>
+    </owl:Restriction>
+  </rdf:type>
+  <대상변수 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">windspeed</대상변수>
+  <비교연산 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">gt</비교연산>
+  <임계값 rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">5.0</임계값>
+  <단위 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">m/s</단위>
+  <심각도 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">block</심각도>
+  <사유 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">풍속이 높으면 약제가 흩날려 방제 효과가 떨어지고 작업자 노출 위험이 있습니다</사유>
+  <검증됨 rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</검증됨>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#고습도">
+  <rdf:type rdf:resource="#환경제약"/>
+  <rdf:type>
+    <owl:Restriction>
+      <owl:onProperty>
+        <rdf:Description>
+          <owl:inverseOf rdf:resource="#제약있음"/>
+        </rdf:Description>
+      </owl:onProperty>
+      <owl:someValuesFrom rdf:resource="#방제"/>
+    </owl:Restriction>
+  </rdf:type>
+  <대상변수 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">indoor_humid</대상변수>
+  <비교연산 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">gt</비교연산>
+  <임계값 rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">90.0</임계값>
+  <단위 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">%</단위>
+  <심각도 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">caution</심각도>
+  <사유 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">습도가 매우 높으면 약액이 마르지 않아 약해가 발생할 수 있습니다</사유>
+  <검증됨 rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</검증됨>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#실내고온">
+  <rdf:type rdf:resource="#환경제약"/>
+  <rdf:type>
+    <owl:Restriction>
+      <owl:onProperty>
+        <rdf:Description>
+          <owl:inverseOf rdf:resource="#제약있음"/>
+        </rdf:Description>
+      </owl:onProperty>
+      <owl:someValuesFrom rdf:resource="#정비"/>
+    </owl:Restriction>
+  </rdf:type>
+  <대상변수 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">indoor_temp</대상변수>
+  <비교연산 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">gt</비교연산>
+  <임계값 rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">35.0</임계값>
+  <단위 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">℃</단위>
+  <심각도 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">caution</심각도>
+  <사유 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">실내 온도가 높으면 작업자 온열 부담이 커집니다</사유>
+  <검증됨 rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</검증됨>
+</owl:NamedIndividual>
+
+<owl:NamedIndividual rdf:about="#외기저온">
+  <rdf:type rdf:resource="#환경제약"/>
+  <rdf:type>
+    <owl:Restriction>
+      <owl:onProperty>
+        <rdf:Description>
+          <owl:inverseOf rdf:resource="#제약있음"/>
+        </rdf:Description>
+      </owl:onProperty>
+      <owl:someValuesFrom rdf:resource="#환기작업"/>
+    </owl:Restriction>
+  </rdf:type>
+  <대상변수 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">out_temp</대상변수>
+  <비교연산 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">lt</비교연산>
+  <임계값 rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">5.0</임계값>
+  <단위 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">℃</단위>
+  <심각도 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">caution</심각도>
+  <사유 rdf:datatype="http://www.w3.org/2001/XMLSchema#string">외부 기온이 낮을 때 환기하면 난방 부하가 크게 늘어납니다</사유>
+  <검증됨 rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</검증됨>
+</owl:NamedIndividual>
+
+
+</rdf:RDF>

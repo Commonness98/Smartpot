@@ -346,15 +346,21 @@ def recommend_schedule(model_path=None, task: str | None = None) -> dict:
     result = {**outlook, "advice": advice, "confidence": conf,
               "drivers": demand_drivers(mp)}
 
-    # 작업 유형이 지목된 경우 온톨로지 규칙으로 제약을 함께 평가
+    # 작업 유형이 지목된 경우 온톨로지에서 성질과 제약을 도출해 함께 평가한다.
+    # deferrable / needs_ventilation / energy_note는 개별 작업이 아니라 상위 개념
+    # (비필수작업·개방작업 등)에 정의된 것을 계층에서 물려받은 값이다.
     if task:
         check = knowledge.evaluate(task, latest_observations(mp))
         result["task_check"] = check
+        note = check.get("energy_note") or ""
 
-        # 에너지 수요와 작업 시점의 연결 근거를 명시한다. 개방(출입·환기)이 필요한
-        # 작업만 난방 수요의 영향을 받으므로, 그 경우에만 사유를 덧붙인다.
-        if check.get("needs_ventilation") and conf["level"] != "낮음":
-            note = check.get("energy_note") or ""
+        if check.get("known") and not check.get("deferrable"):
+            # 필수작업은 수요와 무관하게 수행해야 하므로 연기를 권하지 않는다
+            result["advice"] = (
+                f"{check['label']}는 시점을 미룰 수 있는 작업이 아닙니다. "
+                f"{note}.")
+        elif check.get("needs_ventilation") and conf["level"] != "낮음":
+            # 온실을 여는 작업만 난방 수요의 영향을 받는다
             if level == "높음":
                 result["advice"] = (
                     f"내일은 에너지 수요가 평소보다 높을 것으로 예상됩니다. "
@@ -364,6 +370,11 @@ def recommend_schedule(model_path=None, task: str | None = None) -> dict:
                 result["advice"] = (
                     f"내일은 에너지 수요가 평소보다 낮을 것으로 예상됩니다. "
                     f"난방 부담이 적어 {check['label']}을(를) 진행하기 좋은 날입니다.")
+        elif check.get("known") and not check.get("needs_ventilation"):
+            # 밀폐작업: 미룰 수는 있으나 에너지와는 무관하다
+            result["advice"] = (
+                f"{check['label']}는 온실을 열지 않는 작업이라 {note}. "
+                f"에너지 수요와 무관하게 편한 시점에 진행하셔도 됩니다.")
     return result
 
 
