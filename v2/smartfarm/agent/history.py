@@ -52,6 +52,9 @@ _RE_RECENT_N = re.compile(r"(?:최근|지난)\s*(\d{1,3})\s*일")
 # 마지막 관측일로 답하되 그 사실을 함께 알린다.
 _RE_NOW = re.compile(r"오늘|지금|현재|요즘|근래")
 
+# "A부터 B까지"처럼 구간을 뜻하는 표현. 없으면 나열된 날짜를 각각 비교한다.
+_RE_SPAN = re.compile(r"부터|까지|사이|~|간의|동안")
+
 # 보유 데이터 기간 자체를 묻는 질문
 _RE_COVERAGE = re.compile(
     r"언제\s*부터|언제\s*까지|어느\s*기간|기간이\s*(어떻게|얼마)|"
@@ -290,9 +293,14 @@ def parse_period(question: str, df: pd.DataFrame) -> dict | None:
     if bad:
         return {"kind": "out_of_range", "text": bad[0][1]}
     if len(dates) >= 2:
-        start, end = sorted(dates[:2])
-        return {"kind": "range", "start": start, "end": end,
-                "label": f"{start.date()}~{end.date()}"}
+        if _RE_SPAN.search(question):
+            # "1월 3일부터 2월 3일까지" — 양 끝을 구간으로 본다
+            start, end = min(dates), max(dates)
+            return {"kind": "range", "start": start, "end": end,
+                    "label": f"{start.date()}~{end.date()}"}
+        # "5월 1일이랑 2일이랑 3일 비교" — 날짜를 각각 조회해 나열한다.
+        # 앞의 두 개만 쓰고 나머지를 버리면 묻지 않은 답을 주게 된다.
+        return {"kind": "compare_dates", "dates": dates}
     if len(dates) == 1:
         return {"kind": "point", "date": dates[0]}
 
@@ -444,6 +452,37 @@ def query(question: str, model_path=None) -> dict | None:
                 # 단일 항목 조회 시 기존 호출부 호환을 위해 value도 함께 둔다
                 "value": values.get(TARGET_FEATURE, next(iter(values.values()), None)),
                 "summary": summary}
+
+    if period["kind"] == "compare_dates":
+        rows, parts, missing = [], [], []
+        for d in period["dates"]:
+            d = pd.Timestamp(d).normalize()
+            row = df[df["ts"].dt.normalize() == d]
+            if row.empty:
+                missing.append(str(d.date()))
+                continue
+            vals = {}
+            for role in metrics:
+                if role in row.columns and df[role].astype(float).nunique() > 1:
+                    vals[role] = round(float(row[role].iloc[0]), 2)
+            rows.append({"date": str(d.date()), "values": vals})
+            # 항목이 하나면 이름을 반복하지 않는다("5월 1일은 0.74").
+            # 여러 개면 이름을 붙여 구분한다("5월 1일은 일사량 307, 실내 온도 24").
+            if len(vals) == 1:
+                role, v = next(iter(vals.items()))
+                unit = unit_of(role)
+                shown = f"{v}{' ' + unit if unit else ''}"
+            else:
+                shown = ", ".join(
+                    f"{METRICS.get(r, {'label': r})['label']} {v}"
+                    f"{' ' + unit_of(r) if unit_of(r) else ''}"
+                    for r, v in vals.items())
+            parts.append(f"{_josa(str(d.date()), '은', '는')} {shown}")
+        summary = (", ".join(parts) + "입니다.") if parts else ""
+        if missing:
+            summary += f" {', '.join(missing)}의 데이터는 없습니다."
+        return {**base, "kind": "compare_dates", "found": bool(rows),
+                "metrics": metrics, "rows": rows, "summary": summary.strip()}
 
     if period["kind"] == "range":
         sub = df[(df["ts"] >= period["start"]) & (df["ts"] <= period["end"])]

@@ -151,7 +151,6 @@ def _constraint(name, feature, op, threshold, unit, severity, reason,
 # 임계값 산출 근거 표기
 _SRC_DATA = "활성 데이터셋 분포 기준(실행 시점 산출)"
 _SRC_SAFETY = "작업자 안전 일반 기준(작물별 검증 필요)"
-_SRC_AGRO = "재배 상식에 기반한 잠정값(전문가 검증 필요)"
 
 with _onto:
     # --- 개방작업 공통 제약: 열 손실 관점 --------------------------------

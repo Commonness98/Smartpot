@@ -215,6 +215,12 @@ def _rule_classify(question: str) -> tuple[str, float]:
     """규칙 기반 1차 분류. (의도, 신뢰도 0~1)를 반환한다."""
     q = question.lower().strip()
 
+    # 빈 입력이나 의미를 담기 어려운 짧은 입력은 LLM에 넘기지 않는다.
+    # 판단 근거가 없으면 LLM이 임의 의도를 고르고(빈 문자열을 history로 분류한
+    # 사례가 있었다) 엉뚱한 안내가 나간다.
+    if len(q) < 2:
+        return "general", 0.9
+
     # 보유 데이터로 답할 수 없는 주제는 다른 판정보다 먼저 걸러낸다.
     # 시점 단어("언제", "오늘")만으로 운영 질문이 되어 엉뚱한 답을 만들던 경로 차단.
     if detect_out_of_scope(question):
