@@ -365,6 +365,86 @@ def next_day_outlook(model_path=None) -> dict:
     }
 
 
+def today_vs_tomorrow(model_path=None) -> dict:
+    """오늘과 내일 중 어느 쪽이 에너지 부담이 적은지 비교한다.
+
+    과제의 대표 질문("방제 작업은 오늘 할까 내일 할까?")에 답하기 위한 계산이다.
+    두 값의 성격이 다르다는 점이 중요하다.
+      오늘 = 마지막 관측일의 **실측값**. 확정된 사실이다.
+      내일 = 모델 **예측값**. 신뢰도에 따라 불확실하다.
+    예측이 불확실하다고 비교 자체를 포기하면, 확실한 오늘 값까지 버리게 된다.
+    """
+    mp = _model_path(model_path)
+    outlook = next_day_outlook(mp)
+    df = dataset_frame(mp)
+    if TARGET_FEATURE not in df.columns or df.empty:
+        return {"available": False}
+
+    today = round(float(df[TARGET_FEATURE].astype(float).iloc[-1]), 2)
+    tomorrow = outlook["predicted_energy"]
+    conf = forecast_confidence(tomorrow, mp, method=outlook["method"])
+    err = conf.get("expected_error") or 0.0
+
+    # 최근 실측의 변동성. 예측이 못 미더울 때 기댈 수 있는 확실한 정보다.
+    series = df[TARGET_FEATURE].astype(float)
+    recent = series.tail(_RECENT_WINDOW * 2)
+    recent_std = float(recent.std()) if len(recent) > 2 else None
+    recent_mean = float(recent.mean()) if len(recent) else None
+    overall_std = float(series.std()) if len(series) > 2 else None
+
+    # 안정성은 '전체 기간 대비'로 본다. 변동계수(표준편차/평균)를 쓰면 값 자체가
+    # 작은 시기(봄철 등)에 분모가 작아져 실제로는 잔잔한데도 불안정으로 잡힌다.
+    stable = (recent_std is not None and overall_std
+              and recent_std < 0.3 * overall_std)
+
+    # 날짜 선택이 실제로 얼마나 차이를 만드는지 금액으로 환산한다.
+    # 추상적인 '안정/불안정'보다 "어느 날이든 약 O원 차이"가 판단에 쓸모 있다.
+    daily_swing = float(recent.diff().abs().mean()) if len(recent) > 2 else None
+    swing_cost = None
+    if daily_swing is not None:
+        unit = _energy_unit(mp)
+        if "kwh" in unit.lower() and "m²" in unit:
+            swing_cost = round(daily_swing * config.GREENHOUSE_AREA_M2
+                               * config.avg_tou_rate())
+
+    diff = tomorrow - today
+    # 예측 오차보다 작은 차이는 의미가 없다. 우열을 단정하지 않는다.
+    if abs(diff) <= err:
+        better = None
+        # 예측은 못 믿어도 최근 실측은 확실하다. 그걸로 실행 가능한 답을 준다.
+        base = f"차이가 예측 오차({round(err, 2)}) 안이라 우열을 단정하기 어렵습니다"
+        if stable and swing_cost is not None:
+            reason = (f"{base}. 다만 최근 {len(recent)}일 실측이 안정적이어서, "
+                      f"어느 날에 하시든 에너지 비용 차이는 "
+                      f"대략 {swing_cost:,}원 수준으로 크지 않습니다")
+        elif stable:
+            reason = (f"{base}. 다만 최근 {len(recent)}일 실측이 평균 "
+                      f"{round(recent_mean, 2)}으로 안정적이어서, 어느 날에 하셔도 "
+                      f"부담 차이는 크지 않을 것으로 보입니다")
+        else:
+            reason = base
+    elif diff > 0:
+        better, reason = "오늘", "내일 수요가 더 높을 것으로 예상됩니다"
+    else:
+        better, reason = "내일", "내일 수요가 더 낮을 것으로 예상됩니다"
+
+    return {
+        "available": True,
+        "today_actual": today,
+        "today_date": str(df["ts"].max().date()),
+        "tomorrow_forecast": tomorrow,
+        "tomorrow_confidence": conf["level"],
+        "expected_error": err,
+        "difference": round(diff, 2),
+        "recent_stable": bool(stable),
+        "recent_avg": round(recent_mean, 2) if recent_mean is not None else None,
+        "daily_swing": round(daily_swing, 3) if daily_swing is not None else None,
+        "daily_swing_cost": swing_cost,
+        "better_day": better,
+        "reason": reason,
+    }
+
+
 def recommend_schedule(model_path=None, task: str | None = None) -> dict:
     """예측 수준·신뢰도·작업 제약을 종합해 비필수 작업 일정을 권고."""
     mp = _model_path(model_path)
@@ -373,7 +453,26 @@ def recommend_schedule(model_path=None, task: str | None = None) -> dict:
                                method=outlook["method"])
 
     level = outlook["level"]
-    if conf["level"] == "낮음":
+    cmp_ = today_vs_tomorrow(mp)
+
+    if conf["level"] == "낮음" and cmp_.get("available"):
+        # 예측이 불확실해도 오늘 값은 실측이라 확실하다. 비교를 포기하지 않고
+        # 가진 정보로 우열을 말하되, 불확실한 쪽만 그렇다고 밝힌다.
+        # (물어본 것이 "오늘 할까 내일 할까"인데 답을 피하면 쓸모가 없다.)
+        if cmp_["better_day"]:
+            advice = (
+                f"오늘은 실측 {cmp_['today_actual']}, 내일은 예측 "
+                f"{cmp_['tomorrow_forecast']}로 {cmp_['reason']}. "
+                f"수요만 놓고 보면 {cmp_['better_day']}이 유리합니다. "
+                f"다만 내일 값은 예측 신뢰도가 낮아(오차 약 ±{cmp_['expected_error']}) "
+                f"확정적이지 않습니다.")
+        else:
+            tail = ("" if cmp_.get("recent_stable")
+                    else " 현장 상황을 함께 고려하시기 바랍니다.")
+            advice = (
+                f"오늘은 실측 {cmp_['today_actual']}, 내일은 예측 "
+                f"{cmp_['tomorrow_forecast']}입니다. {cmp_['reason']}.{tail}")
+    elif conf["level"] == "낮음":
         advice = ("내일 수요를 신뢰할 만한 수준으로 예측하기 어렵습니다. "
                   "에너지 수요만으로 작업 시점을 판단하기보다 현장 상황을 함께 "
                   "고려하시기 바랍니다.")
@@ -388,7 +487,7 @@ def recommend_schedule(model_path=None, task: str | None = None) -> dict:
                   "평소대로 작업을 진행해도 무방합니다.")
 
     result = {**outlook, "advice": advice, "confidence": conf,
-              "drivers": demand_drivers(mp)}
+              "comparison": cmp_, "drivers": demand_drivers(mp)}
 
     # 작업 유형이 지목된 경우 온톨로지에서 성질과 제약을 도출해 함께 평가한다.
     # deferrable / needs_ventilation / energy_note는 개별 작업이 아니라 상위 개념
@@ -447,6 +546,7 @@ def build_facts(model_path=None, task: str | None = None) -> dict:
         "schedule": {k: sched[k] for k in
                      ("level", "advice", "estimated_cost", "avg_rate", "cost_basis",
                       "area_m2")},
+        "today_vs_tomorrow": sched.get("comparison"),
         "drivers": sched["drivers"],
         "recent_series": recent_series(mp, days=14),
     }
