@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "smartfarm-streamlit",
+      "runtimeExecutable": "C:\\Users\\A\\Desktop\\창의자율과제\\junseo\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "streamlit", "run", "v1/app/app.py", "--server.headless", "true"],
+      "port": 8501,
+      "autoPort": false
+    }
+  ]
+}

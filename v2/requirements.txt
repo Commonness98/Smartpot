@@ -1,0 +1,15 @@
+# 스마트팜 에이전트 AI - 의존성
+# Python 3.14 / PyTorch 기반 (TensorFlow는 3.14 미지원)
+
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.4
+torch>=2.4          # LSTM/Transformer 예측 모델
+sqlalchemy>=2.0     # DB 추상화 (MariaDB 타깃, SQLite 폴백)
+PyMySQL>=1.1        # MariaDB/MySQL 드라이버 (mariadb 연결 시)
+requests>=2.31      # LM Studio (OpenAI 호환 API) 연동
+py7zr>=0.21         # WUR 온실 데이터셋(.7z) 압축 해제(순수 파이썬, 외부 7z 불필요)
+streamlit>=1.30     # 대화형 웹 UI
+plotly>=5.20        # 시각화
+python-dotenv>=1.0  # 환경변수 로딩
+owlready2>=0.46  # 작업 의사결정 온톨로지(OWL) 정의·계층 추론

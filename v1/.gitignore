@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 환경변수 / 비밀
+.env
+
+# 데이터 (대용량 원본은 커밋 제외, 다운로드 스크립트로 재현)
+data/raw/*.csv
+data/raw/*.zip
+data/raw/*.7z
+data/raw/wur_greenhouse/
+data/*.db
+data/processed/
+
+# 모델 아티팩트
+models_store/
+*.pt
+*.pth
+
+# OS / 에디터
+.DS_Store
+.idea/
+.vscode/
